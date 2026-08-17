@@ -147,7 +147,7 @@ export function CausalGraph({ causalChain, relationshipLabels, animatedTypes }: 
   // 空数据兜底：没有任何因素时展示占位文案，而不是渲染一片空白画布
   if (nodes.length === 0) {
     return (
-      <div className="rounded-xl border border-surface-200 bg-surface-50 p-8 text-center text-sm text-text-tertiary">
+      <div className="rounded-xl border border-gray-200 bg-gray-50 p-8 text-center text-sm text-gray-400">
         完成因果链分析后，此处将显示因果关系图
       </div>
     );
@@ -156,7 +156,7 @@ export function CausalGraph({ causalChain, relationshipLabels, animatedTypes }: 
   return (
     // ReactFlow 画布：nodes/edges 传入上一步算好的数据；fitView 自动缩放平移，让全部节点适配可视区域；
     // Background 画点阵背景便于观察坐标位置，Controls 提供画布缩放/平移按钮。
-    <div className="rounded-xl border border-surface-200 overflow-hidden" style={{ height: 400 }}>
+    <div className="rounded-xl border border-gray-200 overflow-hidden" style={{ height: 400 }}>
       <ReactFlow
         nodes={nodes}
         edges={edges}

@@ -115,7 +115,7 @@ export function FishboneDiagram({ problemTitle, categories }: FishboneDiagramPro
   // 无分类数据（或计算出空内容）时显示占位提示，避免渲染空画布
   if (!svgContent || categories.length === 0) {
     return (
-      <div className="rounded-xl border border-surface-200 bg-surface-50 p-8 text-center text-sm text-text-tertiary">
+      <div className="rounded-xl border border-gray-200 bg-gray-50 p-8 text-center text-sm text-gray-400">
         完成鱼骨图分析后，此处将显示可视化鱼骨图
       </div>
     );
@@ -125,7 +125,7 @@ export function FishboneDiagram({ problemTitle, categories }: FishboneDiagramPro
   // lines 用 dangerouslySetInnerHTML 注入原始 SVG 字符串（注意：注入内容来自本组件内部拼接，无用户脚本风险）；
   // texts 走正常的 JSX <text>，坐标、字号、字重、锚点都来自 texts 数组。
   return (
-    <div className="rounded-xl border border-surface-200 overflow-x-auto bg-surface-0 p-2" role="img" aria-label="鱼骨图（因果分析图）">
+    <div className="rounded-xl border border-gray-200 overflow-x-auto bg-white p-2" role="img" aria-label="鱼骨图（因果分析图）">
       <svg
         viewBox={`0 0 ${svgContent.width} ${svgContent.height}`}
         className="w-full h-auto min-h-[300px]"

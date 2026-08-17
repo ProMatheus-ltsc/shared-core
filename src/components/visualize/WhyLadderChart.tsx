@@ -193,7 +193,7 @@ export function WhyLadderChart({ problemTitle, entries, rootCauseValue, evidence
       : `共追问 ${chain.length} 层，尚未标记根因`;
 
   return (
-    <div className="overflow-x-auto rounded-xl border border-surface-200 bg-surface-0">
+    <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
       <svg viewBox={`0 0 ${width} ${noteY + 20}`} width="100%" role="img" aria-label="5Why 追问阶梯图">
         <title>5Why 追问阶梯图</title>
         <desc>从问题逐层追问 Why 到根因的阶梯链路</desc>

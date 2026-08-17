@@ -6,7 +6,7 @@
  *
  * 提取来源：root-cause-analysis/src/components/history/SnapshotList.tsx
  * 适配说明：Snapshot 类型从公共包 types 引入；原 root-cause 自定义色板
- * （text-text-primary / bg-surface-200 / bg-brand-50 等）改为标准 Tailwind 色板。
+ * （text-gray-900 / bg-gray-200 / bg-blue-50 等）改为标准 Tailwind 色板。
  */
 import { format } from 'date-fns';
 import type { Snapshot } from '../types';

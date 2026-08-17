@@ -64,7 +64,7 @@ export function LoopDiagram({ result }: LoopDiagramProps) {
   const totalHeight = loops.length * PER_RING + 24 + leverageHeight;
 
   return (
-    <div className="overflow-x-auto rounded-xl border border-surface-200 bg-surface-0">
+    <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
       <svg viewBox={`0 0 720 ${totalHeight}`} width="100%" role="img" aria-label="系统思考反馈回路图">
         <title>系统思考反馈回路图</title>
         <desc>AI 识别出的反馈回路闭环与杠杆点</desc>

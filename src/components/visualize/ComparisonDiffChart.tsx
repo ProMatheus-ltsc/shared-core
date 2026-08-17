@@ -67,7 +67,7 @@ export function ComparisonDiffChart({ normalCase, abnormalCase, rows }: Comparis
   const barLen = (s: string) => Math.max(24, Math.min(barW - 12, s.replace(/\s/g, '').length * 8 + 20));
 
   return (
-    <div className="overflow-x-auto rounded-xl border border-surface-200 bg-surface-0">
+    <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white">
       <svg viewBox={`0 0 640 ${height}`} width="100%" role="img" aria-label="对比分析差异图">
         <title>对比分析差异图</title>
         <desc>正常情况与异常情况在各维度的对照差异</desc>
