@@ -54,6 +54,11 @@
     "./utils/loopDetection": "./src/utils/loopDetection.ts",
     "./utils/suggestions": "./src/utils/suggestions.ts"
   },
+  "devDependencies": {
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@types/uuid": "^10.0.0"
+  },
   "peerDependencies": {
     "react": ">=18.0.0",
     "react-dom": ">=18.0.0",
