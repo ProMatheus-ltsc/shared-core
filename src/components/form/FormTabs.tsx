@@ -40,7 +40,7 @@ export function FormTabs({
 }: FormTabsProps) {
   // 兼容旧 API：tabs 简写 → 无 sections 时使用
   const list = sections
-    ? sections.map((s) => ({ id: s.id, title: s.title, collapsed: s.collapsedByDefault }))
+    ? sections.map((s, i) => ({ id: s.id, title: s.title, collapsed: s.collapsedByDefault }))
     : (tabs ?? []).map((t) => ({ id: t.id, title: t.title, collapsed: false }));
 
   if (list.length <= 1) return null;

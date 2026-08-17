@@ -28,6 +28,7 @@ import {
   TableInput,
   QuadrantInput,
   DragMatrixInput,
+  ComputedDisplay,
   buildValidationRules,
   type InputFieldProps,
 } from './FieldInputs';
@@ -96,6 +97,7 @@ const errorTextClass = 'text-xs text-red-500 mt-1';
 
 const FieldRendererImpl = memo(function FieldRenderer({
   field,
+  register,
   name,
   controlled,
   value,

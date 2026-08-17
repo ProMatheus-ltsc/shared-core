@@ -122,7 +122,7 @@ export function TextInput({ field, inputClass, register, controlled, value, onCh
 }
 
 /** 多行文本输入（自适应高度；自动补全仅 text 类型经 datalist 支持） */
-export function TextareaInput({ field, inputClass, register, controlled, value, onChange, disabled, readOnly }: InputFieldProps) {
+export function TextareaInput({ field, inputClass, register, controlled, value, onChange, disabled, suggestions, readOnly }: InputFieldProps) {
   const isDisabled = disabled || readOnly;
   if (controlled) {
     return (
@@ -234,7 +234,7 @@ export function SelectInput({ field, inputClass, register, controlled, value, on
 }
 
 /** 单选组 */
-export function RadioInput({ field, register, controlled, value, onChange, disabled }: InputFieldProps) {
+export function RadioInput({ field, inputClass, register, controlled, value, onChange, disabled }: InputFieldProps) {
   if (controlled) {
     return (
       <div className="flex flex-col sm:flex-row flex-wrap gap-3 sm:gap-4">
