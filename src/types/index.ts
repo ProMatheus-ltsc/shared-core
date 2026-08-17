@@ -18,6 +18,7 @@ export type FieldType =
   | 'table'
   | 'quadrant'
   | 'dragMatrix'
+  | 'jsonImport'
   | 'custom'
   | 'hidden';
 
