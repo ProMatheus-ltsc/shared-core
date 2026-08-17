@@ -2,6 +2,9 @@
 node_modules
 node_modules/
 
+# WorkBuddy 工作区数据（记忆等）
+.workbuddy/
+
 # 构建产物
 dist/
 build/

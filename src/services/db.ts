@@ -4,7 +4,7 @@
  * 默认使用通用的 records + settings 两表结构
  */
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
-import type { Account, FormRecord, ExportedData } from '../types';
+import type { Account, FormRecord, ExportedData, Snapshot } from '../types';
 
 interface MetaDBSchema extends DBSchema {
   accounts: {
@@ -27,6 +27,14 @@ interface BusinessDBSchema extends DBSchema {
   settings: {
     key: string;
     value: { key: string; value: unknown };
+  };
+  snapshots: {
+    key: string;
+    value: Snapshot;
+    indexes: {
+      recordId: string;
+      createdAt: string;
+    };
   };
 }
 
@@ -75,14 +83,25 @@ function getBusinessDB(): Promise<IDBPDatabase<BusinessDBSchema>> {
   }
   if (!businessDBPromise) {
     const dbName = `${DB_PREFIX}-${currentAccountId}`;
-    businessDBPromise = openDB<BusinessDBSchema>(dbName, 1, {
+    // 版本 2：新增 snapshots 表（版本 1 已存在的库升级时，upgrade 回调会再次执行，
+    // 通过 objectStoreNames.contains 避免重复建表报错）
+    businessDBPromise = openDB<BusinessDBSchema>(dbName, 2, {
       upgrade(db) {
-        const recordStore = db.createObjectStore('records', { keyPath: 'id' });
-        recordStore.createIndex('templateId', 'templateId');
-        recordStore.createIndex('createdAt', 'createdAt');
-        recordStore.createIndex('updatedAt', 'updatedAt');
-        recordStore.createIndex('module', 'module');
-        db.createObjectStore('settings', { keyPath: 'key' });
+        if (!db.objectStoreNames.contains('records')) {
+          const recordStore = db.createObjectStore('records', { keyPath: 'id' });
+          recordStore.createIndex('templateId', 'templateId');
+          recordStore.createIndex('createdAt', 'createdAt');
+          recordStore.createIndex('updatedAt', 'updatedAt');
+          recordStore.createIndex('module', 'module');
+        }
+        if (!db.objectStoreNames.contains('settings')) {
+          db.createObjectStore('settings', { keyPath: 'key' });
+        }
+        if (!db.objectStoreNames.contains('snapshots')) {
+          const snapshotsStore = db.createObjectStore('snapshots', { keyPath: 'id' });
+          snapshotsStore.createIndex('recordId', 'recordId');
+          snapshotsStore.createIndex('createdAt', 'createdAt');
+        }
       },
     });
   }
@@ -201,4 +220,33 @@ export async function getRecordsModifiedSince(since: string | null): Promise<For
   const all = await getAllRecords();
   if (!since) return all;
   return all.filter((r) => r.updatedAt > since);
+}
+
+// === 快照操作（版本历史，提取自 root-cause-analysis） ===
+
+/** 按 recordId 索引取出某条记录的全部快照（按创建时间升序）。 */
+export async function getSnapshotsByRecord(recordId: string): Promise<Snapshot[]> {
+  const db = await getBusinessDB();
+  return db.getAllFromIndex('snapshots', 'recordId', recordId);
+}
+
+/** 保存一个快照（覆盖同 id）。 */
+export async function putSnapshot(snapshot: Snapshot): Promise<void> {
+  const db = await getBusinessDB();
+  await db.put('snapshots', snapshot);
+}
+
+/** 按主键删除单个快照。 */
+export async function deleteSnapshot(id: string): Promise<void> {
+  const db = await getBusinessDB();
+  await db.delete('snapshots', id);
+}
+
+/** 删除某条记录的全部快照（记录被删除时连带清理，避免孤儿快照）。 */
+export async function deleteSnapshotsByRecord(recordId: string): Promise<void> {
+  const db = await getBusinessDB();
+  const all = await db.getAllFromIndex('snapshots', 'recordId', recordId);
+  const tx = db.transaction('snapshots', 'readwrite');
+  await Promise.all(all.map((s) => tx.store.delete(s.id)));
+  await tx.done;
 }

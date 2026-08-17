@@ -59,9 +59,11 @@ configureDB('review-app');        // 个人复盘
 ### 类型 (`types/`)
 - `FormTemplate`, `FormField`, `FormSection`, `FormRecord`
 - `Account`, `ExportedData`, `SyncStatus`, `SyncResult`
+- `Snapshot`（版本快照）, `CausalChainItem`（回路检测）, `AiLoop`/`AiLeveragePoint`/`AiAnalysisResult`
+- `QuadrantKey`/`QuadrantItem`/`QuadrantConfig`/`DragMatrixValue`/`DragMatrixQuadrantConfig`（象限/矩阵字段）
 
 ### 服务 (`services/`)
-- `db.ts` — IndexedDB 多账户隔离数据层（可配置数据库前缀）
+- `db.ts` — IndexedDB 多账户隔离数据层（可配置数据库前缀，含快照 CRUD：getSnapshotsByRecord/putSnapshot/deleteSnapshot）
 - `auth.ts` — PBKDF2-SHA256 本地认证
 - `cloudflareD1.ts` — Cloudflare D1 远程备份同步
 
@@ -69,23 +71,23 @@ configureDB('review-app');        // 个人复盘
 - `useAuth.tsx` — 认证状态机 Provider + Hook
 - `useToast.tsx` — 全局通知系统
 - `useDB.ts` — 数据 CRUD Hooks
-- `usePhaseLogic.ts` — 多阶段表单生命周期
+- `usePhaseLogic.ts` — 多阶段表单生命周期（含 useFormPhaseLogic 增强版）
+- `useSnapshots.ts` — 版本快照（保存/查看/删除，每记录上限 20 条）
+- `useSearch.ts` — flexsearch 全文搜索（依赖可选库，走子路径导入）
 
 ### 组件 (`components/`)
-- `Layout.tsx` — 可配置的应用壳（传入 navItems + appConfig）
-- `Toast.tsx` — 通知容器
-- `ConfirmDialog.tsx` — 确认弹窗
-- `LoadingSpinner.tsx` — 加载状态
-- `ProtectedRoute.tsx` — 路由守卫
-- `form/FormRenderer.tsx` — 核心表单引擎
-- `form/FieldRenderer.tsx` — 字段渲染器
-- `form/FieldInputs.tsx` — 底层输入组件
-- `form/FormTabs.tsx` — Tab 导航
-- `form/RepeatableSection.tsx` — 可重复分区
-- `form/PhaseIndicator.tsx` — 阶段指示器
+- 基础：`Layout`、`ToastContainer`、`ConfirmDialog`、`LoadingSpinner`、`ProtectedRoute`、`SearchBar`、`PasswordInput`、`TemplateCard`、`RecordList`、`VersionHistoryList`
+- 表单引擎（RHF 增强版）：`form/FormRenderer`（自动保存/分阶段校验/锁定只读/业务 slots 扩展点）、`form/FieldRenderer`、`form/FieldInputs`（text/textarea/number/date/select/radio/checkbox/rating/table/quadrant/dragMatrix/computed/singleCheckbox + 自动补全）、`form/ConditionalField`（basePath 嵌套 + '*' 通配）、`form/FormTabs`（锁定/只读/错误角标）、`form/RepeatableSection`（折叠/撤销删除/stopAppendWhen）、`form/PhaseIndicator`（时间锁/冷静期）、`form/PhaseNotice`、`form/OptionalFieldsGroup`、`form/CollapsibleSection`、`form/FormNavButtons`
+- 统计与可视化：`stats/StatCard`、`stats/KeywordList`、`stats/RootCauseTypePie`（recharts，可选依赖）、`visualize/MatrixHeatmap`、`visualize/FishboneDiagram`、`visualize/ComparisonDiffChart`、`visualize/CausalGraph`（@xyflow/react，可选依赖）、`visualize/TimelineChart`、`visualize/WhyLadderChart`、`visualize/LoopDiagram`
 
 ### 工具 (`utils/`)
-- `formValidation.ts` — 字段校验、默认值解析、完成度计算
+- `formValidation.ts` — 字段校验、默认值解析、完成度计算、阶段时间锁
+- `exportFormatter.ts` — 导出字段格式化（select/checkbox/date/table 等 → 文本/Markdown）
+- `loopDetection.ts` — 因果链回路检测（DFS 找环 + 奇偶判型 + 杠杆点）
+- `suggestions.ts` — 从历史记录提取字段建议值
+
+> 注：`CausalGraph`（@xyflow/react）、`RootCauseTypePie`（recharts）、`useSearch`（flexsearch）依赖可选库，
+> 使用方需自行安装对应依赖，并通过子路径导入（如 `@shared/core/components/visualize/CausalGraph`）。
 
 ## 设计原则
 
