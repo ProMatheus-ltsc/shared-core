@@ -22,10 +22,10 @@ interface StatCardProps {
  */
 export function StatCard({ label, value, hint, accentClassName }: StatCardProps) {
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-      <p className="text-sm text-slate-500">{label}</p>
-      <p className={`mt-1 text-2xl font-semibold ${accentClassName ?? 'text-slate-900'}`}>{value}</p>
-      {hint && <p className="mt-1 text-xs text-slate-400">{hint}</p>}
+    <div className="flex h-full flex-col rounded-xl bg-white p-5 shadow-[0_1px_3px_rgba(0,0,0,0.08),0_1px_2px_rgba(0,0,0,0.04)] hover:shadow-[0_4px_6px_rgba(0,0,0,0.07),0_2px_4px_rgba(0,0,0,0.04)] transition-shadow duration-200">
+      <p className="text-[13px] font-medium text-slate-500 tracking-wide">{label}</p>
+      <p className={`mt-2 text-[28px] font-bold leading-tight tracking-tight ${accentClassName ?? 'text-slate-900'}`} style={{ fontVariantNumeric: 'tabular-nums' }}>{value}</p>
+      <p className={`mt-2 text-xs leading-relaxed ${hint ? 'text-slate-400' : 'text-transparent'}`}>{hint || '\u00A0'}</p>
     </div>
   );
 }
