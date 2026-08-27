@@ -1,6 +1,7 @@
 /**
- * Toast 通知组件
+ * Toast 通知组件 — 使用 Portal 渲染到 body 层级，避免被任何父级 stacking context 遮挡
  */
+import { createPortal } from 'react-dom';
 import { useToast, type ToastType } from '../hooks/useToast';
 import { X } from 'lucide-react';
 
@@ -23,15 +24,21 @@ export function ToastContainer() {
 
   if (toasts.length === 0) return null;
 
-  return (
-    <div className="fixed top-4 right-4 z-[9999] flex flex-col gap-2 max-w-sm">
+  return createPortal(
+    <div
+      className="fixed top-4 right-4 z-[9999] flex flex-col gap-2 max-w-sm"
+      style={{ pointerEvents: 'none' }}
+      role="alert"
+      aria-live="assertive"
+    >
       {toasts.map((toast) => (
         <div
           key={toast.id}
-          className={`flex items-center gap-3 px-4 py-3 rounded-lg border shadow-lg animate-in slide-in-from-right duration-300 ${typeStyles[toast.type]}`}
+          style={{ pointerEvents: 'auto' }}
+          className={`flex items-center gap-3 px-4 py-3 rounded-lg border-2 shadow-xl animate-in slide-in-from-right duration-300 ${typeStyles[toast.type]}`}
         >
           <span className="text-lg font-bold flex-shrink-0">{typeIcons[toast.type]}</span>
-          <p className="text-sm flex-1">{toast.message}</p>
+          <p className="text-sm flex-1 font-medium">{toast.message}</p>
           <button
             onClick={() => removeToast(toast.id)}
             className="flex-shrink-0 opacity-60 hover:opacity-100 transition-opacity"
@@ -40,6 +47,7 @@ export function ToastContainer() {
           </button>
         </div>
       ))}
-    </div>
+    </div>,
+    document.body
   );
 }
