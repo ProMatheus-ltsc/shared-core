@@ -75,12 +75,13 @@ export function FinanceStackedArea({
         name: s.module,
         type: 'line',
         stack: 'finance-total',
-        symbol: 'none',
+        symbol: 'circle',
+        symbolSize: 6,
+        showSymbol: true,
         lineStyle: { width: 1.5 },
-        areaStyle: { opacity: 0.85 },
-        emphasis: { focus: 'series' },
+        areaStyle: { opacity: 0.75 },
+        emphasis: { focus: 'series', itemStyle: { borderWidth: 2, borderColor: '#fff' } },
         data: values,
-        // 终点标注：序列末端显示模块名（重叠自动隐藏）
         endLabel: {
           show: true,
           formatter: s.module,
