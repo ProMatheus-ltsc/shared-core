@@ -8,7 +8,7 @@
  * 收益率以小数传入（0.035 = 3.5%），展示层自动换算百分比。
  */
 import { CanvasRenderer } from 'echarts/renderers';
-import { BarChart } from 'echarts/charts';
+import { BarChart, LineChart } from 'echarts/charts';
 import { GridComponent, TooltipComponent, LegendComponent, MarkLineComponent } from 'echarts/components';
 import { use } from 'echarts/core';
 import {
@@ -18,7 +18,7 @@ import {
   type FinanceChartBaseProps,
 } from './financeChartShared';
 
-use([CanvasRenderer, BarChart, GridComponent, TooltipComponent, LegendComponent, MarkLineComponent]);
+use([CanvasRenderer, BarChart, LineChart, GridComponent, TooltipComponent, LegendComponent, MarkLineComponent]);
 
 export interface FinanceCompareBarGroup {
   /** 模块名 */
@@ -60,10 +60,9 @@ export function FinanceCompareBar({
     const actuals = groups.map((g, i) => ({
       value: g.actualRate,
       itemStyle: { color: colors[i % colors.length] },
-      // 缺值占位符：无柱时在轴上标注
       label: {
         show: g.actualRate === null,
-        position: 'top',
+        position: 'top' as const,
         formatter: blankLabel,
         color: '#94a3b8',
         fontSize: 12,
@@ -116,19 +115,10 @@ export function FinanceCompareBar({
       },
       series: [
         {
-          name: '目标收益率（月化）',
-          type: 'bar',
-          barGap: '10%',
-          barWidth: '28%',
-          itemStyle: { color: targetColor },
-          data: targets,
-        },
-        {
           name: '实际收益率（环比）',
           type: 'bar',
-          barWidth: '28%',
+          barWidth: '40%',
           data: actuals,
-          // 0 轴参考线（收益率可负）
           markLine: {
             silent: true,
             symbol: 'none',
@@ -136,6 +126,16 @@ export function FinanceCompareBar({
             label: { show: false },
             data: [{ yAxis: 0 }],
           },
+        },
+        {
+          name: '目标收益率（月化）',
+          type: 'line',
+          symbol: 'diamond',
+          symbolSize: 8,
+          lineStyle: { width: 2, type: 'dashed', color: targetColor },
+          itemStyle: { color: targetColor, borderWidth: 2, borderColor: '#fff' },
+          data: targets,
+          z: 10,
         },
       ],
     };
