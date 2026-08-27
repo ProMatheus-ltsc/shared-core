@@ -72,28 +72,37 @@ export function FinanceTreemap({
     series: [
       {
         type: 'treemap',
-        // squarified：矩形面积 = 金额
         roam: false,
-        nodeClick: false, // 下钻由消费方经 onItemClick 接管，组件内不做面包屑跳转
+        nodeClick: false,
         breadcrumb: { show: false },
         width: '100%',
         height: '100%',
         squareRatio: 0.7,
         label: {
           show: true,
-          formatter: '{b}',
-          color: 'auto', // 标签按背景亮度自动选白/墨色
-          fontSize: 12,
+          formatter: (p: { name: string; value: number }) => `{name|${p.name}}\n{val|${formatFinanceAmount(p.value, unit)}}`,
+          rich: {
+            name: { fontSize: 12, fontWeight: 'bold' as const, color: '#fff', lineHeight: 16, textShadowColor: 'rgba(0,0,0,0.5)', textShadowBlur: 2 },
+            val: { fontSize: 10, color: 'rgba(255,255,255,0.85)', lineHeight: 14, textShadowColor: 'rgba(0,0,0,0.5)', textShadowBlur: 2 },
+          },
+          verticalAlign: 'middle',
+          overflow: 'truncate',
         },
         upperLabel: { show: false },
-        itemStyle: { borderColor: '#fff', borderWidth: 1.5, gapWidth: 1.5 },
+        itemStyle: { borderColor: '#fff', borderWidth: 2, gapWidth: 2 },
         emphasis: { itemStyle: { borderColor: '#334155', borderWidth: 2 } },
         levels: [
           { itemStyle: { borderWidth: 2, gapWidth: 2 } },
           {
-            colorSaturation: [0.35, 0.65],
+            colorSaturation: [0.4, 0.7],
             itemStyle: { borderColorSaturation: 0.5, gapWidth: 1 },
-            label: { fontSize: 11 },
+            label: {
+              formatter: (p: { name: string; value: number }) => `{name|${p.name}}\n{val|${formatFinanceAmount(p.value, unit)}}`,
+              rich: {
+                name: { fontSize: 11, fontWeight: 'bold' as const, color: '#fff', lineHeight: 14, textShadowColor: 'rgba(0,0,0,0.5)', textShadowBlur: 2 },
+                val: { fontSize: 9, color: 'rgba(255,255,255,0.8)', lineHeight: 12, textShadowColor: 'rgba(0,0,0,0.5)', textShadowBlur: 2 },
+              },
+            },
           },
         ],
         data: toEchartsTree(data),
