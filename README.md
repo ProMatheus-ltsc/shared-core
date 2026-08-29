@@ -1,16 +1,20 @@
-# @shared/core - 三项目共用基座包
+# @shared/core - 多项目共用基座包
 
 ## 概述
 
-此包是三个项目的共用基础设施层，通过本地路径引用（非npm发布）实现代码共享：
+此包是多个项目的共用基础设施层，通过本地路径引用（非 npm 发布）实现代码共享：
 
 - **公考复盘系统** (`civil-exam-system`)
 - **根因分析系统** (`root-cause-analysis`)
 - **个人复盘系统** (`personal_review_system`)
+- **能力成长系统** (`ability-growth-system`)
+- **财富成长系统** (`money-growth-system`)
 
-## 使用方式
+## 引用方式（标准模式，参考 ability-growth-system）
 
-### 1. 在项目 package.json 中添加本地依赖
+所有项目统一以下列方式接入（Vite 项目模板照抄即可）：
+
+**1. package.json 本地依赖**
 
 ```json
 {
@@ -20,17 +24,22 @@
 }
 ```
 
-### 2. 在 vite.config.ts 中配置别名
+**2. vite.config.ts 别名 + dedupe（两个都要，缺一不可）**
 
 ```typescript
 resolve: {
   alias: {
     '@shared/core': path.resolve(__dirname, '../shared-core/src'),
-  }
+  },
+  // 强制 React 系列解析到项目根 node_modules 的单实例：
+  // @shared/core 源码位于项目父目录，其自身 node_modules 里有 npm 自动安装的独立 react 副本，
+  // 不 dedupe 会导致 production bundle 出现两份 React，hooks dispatcher 为 null 而白屏
+  // （dev 因依赖预打包不受影响，typecheck/build 也不报错）。
+  dedupe: ['react', 'react-dom', 'react-router', 'react-router-dom', 'react-hook-form'],
 }
 ```
 
-### 3. 在 tsconfig.json 中配置路径
+**3. tsconfig.json 路径**
 
 ```json
 {
@@ -43,7 +52,18 @@ resolve: {
 }
 ```
 
-### 4. 在项目入口初始化数据库前缀
+**4. 共享包目录内必须 `npm install`（peer 依赖解析）**
+
+消费方 bundler 直接编译 shared-core 的 TS 源码，源码里的裸导入（如 `lucide-react`）按「导入文件位置」向上查找 node_modules——**消费方自己的 node_modules 帮不上忙**，shared-core 目录内必须安装依赖（npm 7+ 会自动装 peer）：
+
+```bash
+cd ../shared-core && npm install   # shared-core 目录内执行
+npm install                        # 回到消费项目执行
+```
+
+CI 中先装 shared-core 依赖再装主项目依赖（参考 root-cause-analysis 的 deploy.yml）。
+
+**5. 数据库前缀隔离**
 
 ```typescript
 import { configureDB } from '@shared/core';
@@ -52,17 +72,9 @@ import { configureDB } from '@shared/core';
 configureDB('civil-exam-app');    // 公考系统
 configureDB('rca-app');           // 根因分析
 configureDB('review-app');        // 个人复盘
+configureDB('ability-app');       // 能力成长
+configureDB('fam-asset-app');     // 财富成长
 ```
-
-### 5. 安装 peer 依赖
-
-公共包声明了以下 peerDependencies，使用方项目需自行安装：
-
-```bash
-npm install react-hook-form clsx date-fns
-```
-
-> 已在项目中的无需重复安装。可选依赖（recharts / @xyflow/react / flexsearch）只在用到对应组件时安装，见下文「可选依赖」。
 
 ## 使用示例
 
@@ -94,6 +106,37 @@ import { Layout } from '@shared/core';
 />
 ```
 
+### 空状态 EmptyState（带/不带图标两种形态）
+```tsx
+import { EmptyState } from '@shared/core';
+// 带 icon：圆形图标底样式；无 icon：虚线边框卡片样式
+<EmptyState icon={Inbox} title="暂无数据" description="导入后显示" action={<button>去导入</button>} />
+```
+
+### 消息提示 Toast（两种形态按需取用）
+```tsx
+import { ToastContainer, Toast, useToast } from '@shared/core';
+// 新项目推荐：useToast + ToastContainer（Context 全局通知栈，Portal 渲染）
+const { showToast } = useToast();
+showToast({ type: 'success', message: '已保存' });
+// 老项目自管状态：单实例受控 Toast（error 5 秒 / 其他 3 秒自动关闭）
+<Toast message="已保存" type="success" isVisible={visible} onClose={() => setVisible(false)} />
+```
+
+### 确认弹窗 ConfirmDialog（支持 open/isOpen 两种属性名）
+```tsx
+import { ConfirmDialog } from '@shared/core';
+<ConfirmDialog
+  open={dialogOpen}          // 旧调用方可用 isOpen 别名
+  title="清空全部数据"
+  message={<span>此操作不可恢复</span>}   // 支持 ReactNode
+  variant="danger"           // danger | warning | info
+  onConfirm={handleConfirm}
+  onCancel={() => setDialogOpen(false)}
+/>
+```
+
+### 渲染模板驱动表单（核心能力）
 ### 渲染模板驱动表单（核心能力）
 
 ```tsx

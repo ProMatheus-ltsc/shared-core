@@ -18,6 +18,7 @@
     "./hooks/useSearch": "./src/hooks/useSearch.ts",
     "./hooks/useSnapshots": "./src/hooks/useSnapshots.ts",
     "./components/Layout": "./src/components/Layout.tsx",
+    "./components/EmptyState": "./src/components/EmptyState.tsx",
     "./components/Toast": "./src/components/Toast.tsx",
     "./components/ConfirmDialog": "./src/components/ConfirmDialog.tsx",
     "./components/LoadingSpinner": "./src/components/LoadingSpinner.tsx",
