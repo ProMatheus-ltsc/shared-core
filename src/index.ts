@@ -40,6 +40,7 @@ export { useSnapshots } from './hooks/useSnapshots';
 
 // 基础组件
 export { Layout } from './components/Layout';
+export type { NavItem, NavLeaf, NavGroup, AppConfig, LayoutUser } from './components/Layout';
 export { ToastContainer } from './components/Toast';
 export { ConfirmDialog } from './components/ConfirmDialog';
 export { LoadingSpinner } from './components/LoadingSpinner';

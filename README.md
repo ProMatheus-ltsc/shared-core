@@ -66,6 +66,34 @@ npm install react-hook-form clsx date-fns
 
 ## 使用示例
 
+### 渲染统一应用壳 Layout（所有项目默认 UI 风格基线）
+```tsx
+import { Layout } from '@shared/core';
+// 统一 UI 风格：可折叠侧边栏（w-16/w-60）+ 分组导航 + 移动端 Drawer + ⌘K 菜单搜索
+// navItems（扁平导航）与 groups（分组导航）二选一；未传 user/onLogout 时回退到包内 useAuth
+<Layout
+  navItems={[
+    { to: '/', icon: Home, label: '首页', end: true },
+    { to: '/data', icon: Database, label: '数据管理' },
+  ]}
+  appConfig={{ name: '应用名', icon: AppIcon }}
+/>
+// 使用方自有认证体系时注入（不依赖包内 AuthProvider）：
+<Layout
+  navItems={navItems}
+  appConfig={appConfig}
+  enableSearch={false}              // 关闭内置 ⌘K 菜单搜索（默认开启）
+  user={account ? { username: account.username } : null}
+  onLogout={handleLogout}
+/>
+// 分组导航（一级组 + 二级叶子，展开态记忆到 localStorage，storageKey 可配置）：
+<Layout
+  groups={[{ key: 'daily', label: '日常工作', icon: Calendar, children: [{ to: '/today', icon: Clock, label: '今日工作台' }] }]}
+  appConfig={appConfig}
+  storageKey="my-app-nav-expanded"
+/>
+```
+
 ### 渲染模板驱动表单（核心能力）
 
 ```tsx
