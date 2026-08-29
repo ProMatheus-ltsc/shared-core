@@ -37,6 +37,8 @@ export { useRecords, useRecord, useSaveRecord, useDeleteRecord, useSearchRecords
 export { usePhaseLogic, useFormPhaseLogic } from './hooks/usePhaseLogic';
 export type { PhaseState, UseFormPhaseLogicParams, UseFormPhaseLogicResult } from './hooks/usePhaseLogic';
 export { useSnapshots } from './hooks/useSnapshots';
+export { useMediaQuery } from './hooks/useMediaQuery';
+export { useBodyScrollLock } from './hooks/useBodyScrollLock';
 
 // 基础组件
 export { Layout } from './components/Layout';
@@ -51,6 +53,18 @@ export { default as PasswordInput } from './components/PasswordInput';
 export { default as TemplateCard } from './components/TemplateCard';
 export { default as RecordList } from './components/RecordList';
 export { VersionHistoryList } from './components/VersionHistoryList';
+
+// 移动端响应式基建组件（配套样式：入口 import '@shared/core/styles/responsive.css'）
+export { ResponsiveGrid } from './components/responsive/ResponsiveGrid';
+export type { ResponsiveGridProps } from './components/responsive/ResponsiveGrid';
+export { Stack } from './components/responsive/Stack';
+export type { StackProps } from './components/responsive/Stack';
+export { TableScroll } from './components/responsive/TableScroll';
+export type { TableScrollProps } from './components/responsive/TableScroll';
+export { ResponsiveTable } from './components/responsive/ResponsiveTable';
+export type { ResponsiveTableColumn, ResponsiveTableProps } from './components/responsive/ResponsiveTable';
+export { ResponsiveChart } from './components/responsive/ResponsiveChart';
+export type { ResponsiveChartProps } from './components/responsive/ResponsiveChart';
 
 // 表单引擎组件
 export { FormRenderer } from './components/form/FormRenderer';

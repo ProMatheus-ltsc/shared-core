@@ -8,6 +8,8 @@
  * - 单页（无子项）的一级项作为普通链接直接跳转
  * - 折叠态：图标 + tooltip
  * - 移动端（<lg 断点）：侧边栏变为 Drawer 抽屉 + 顶部条
+ *   （Esc 关闭 / body 滚动锁定 / 关闭后焦点回到汉堡按钮 / dialog aria 语义 /
+ *     切回桌面尺寸自动收起；touch-target 触控目标依赖入口引入 responsive.css）
  * - Ctrl+K / Cmd+K：基于导航菜单的全局搜索面板（可通过 enableSearch={false} 关闭）
  * - 分组展开态记忆到 localStorage（storageKey 可配置）
  *
@@ -16,9 +18,11 @@
  * - 未注入 user/onLogout 时，回退到 shared-core 内部 useAuth
  *   （使用方有自己的认证体系时，传入 user + onLogout 即可解耦）
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
+import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
+import { useMediaQuery } from '../hooks/useMediaQuery';
 import { ChevronDown, ChevronRight, LogOut, Menu, PanelLeftClose, PanelLeftOpen, Search, X } from 'lucide-react';
 
 /** 扁平导航项（等价于单页组） */
@@ -125,6 +129,27 @@ function LayoutBase({
     return new Set();
   });
 
+  // ===== 移动端 Drawer 增强（Esc 关闭 / 滚动锁定 / 焦点恢复 / 桌面尺寸自动收起） =====
+  // 汉堡按钮 ref：Drawer 关闭后焦点恢复的目标
+  const hamburgerRef = useRef<HTMLButtonElement>(null);
+  // ≥lg(1024px) 视为桌面：切回桌面尺寸时自动收起 Drawer
+  const isDesktop = useMediaQuery('(min-width: 1024px)');
+  // Drawer 打开时锁定 body 滚动（引用计数，可与弹窗等嵌套锁定共存）
+  useBodyScrollLock(mobileOpen);
+
+  useEffect(() => {
+    if (isDesktop) setMobileOpen(false);
+  }, [isDesktop]);
+
+  // Drawer 由开变关时，焦点回到汉堡按钮（键盘 / 读屏可达性）
+  const prevMobileOpenRef = useRef(false);
+  useEffect(() => {
+    if (prevMobileOpenRef.current && !mobileOpen) {
+      hamburgerRef.current?.focus();
+    }
+    prevMobileOpenRef.current = mobileOpen;
+  }, [mobileOpen]);
+
   // 扁平 navItems 归一化为「单页组」
   const normalizedGroups: NavGroup[] = useMemo(() => {
     if (groups?.length) return groups;
@@ -137,15 +162,17 @@ function LayoutBase({
     }));
   }, [groups, navItems]);
 
-  // Ctrl+K / Cmd+K 打开全局搜索
+  // Ctrl+K / Cmd+K 打开全局搜索；Esc 关闭搜索面板与移动端 Drawer
   useEffect(() => {
-    if (!enableSearch) return;
     const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+      if (enableSearch && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         setSearchOpen((v) => !v);
       }
-      if (e.key === 'Escape') setSearchOpen(false);
+      if (e.key === 'Escape') {
+        setSearchOpen(false);
+        setMobileOpen(false);
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -227,9 +254,12 @@ function LayoutBase({
       {/* 移动端顶部条(<lg 断点显示) */}
       <div className="lg:hidden flex items-center justify-between bg-white border-b border-slate-200 px-3 h-14 sticky top-0 z-30">
         <button
-          className="p-2 rounded hover:bg-slate-100"
+          ref={hamburgerRef}
+          className="p-2.5 rounded hover:bg-slate-100 touch-target"
           onClick={() => setMobileOpen(true)}
           aria-label="打开菜单"
+          aria-expanded={mobileOpen}
+          aria-controls="layout-mobile-drawer"
         >
           <Menu size={20} />
         </button>
@@ -241,7 +271,7 @@ function LayoutBase({
         </div>
         {enableSearch ? (
           <button
-            className="p-2 rounded hover:bg-slate-100"
+            className="p-2.5 rounded hover:bg-slate-100 touch-target"
             onClick={() => setSearchOpen(true)}
             aria-label="搜索"
           >
@@ -261,6 +291,10 @@ function LayoutBase({
       )}
 
       <aside
+        id="layout-mobile-drawer"
+        role={mobileOpen ? 'dialog' : undefined}
+        aria-modal={mobileOpen ? 'true' : undefined}
+        aria-label={appConfig.name}
         className={`
           fixed left-0 top-0 bottom-0 flex flex-col bg-white border-r border-slate-200 z-50 transition-transform duration-300
           ${sidebarWidth}
@@ -381,7 +415,7 @@ function LayoutBase({
           )}
           <button
             onClick={() => setCollapsed(!collapsed)}
-            className={`flex items-center gap-2 w-full rounded-lg text-sm text-slate-500 hover:text-slate-700 hover:bg-slate-50 transition-all ${collapsed ? 'px-0 py-2 justify-center' : 'px-3 py-2'}`}
+            className={`flex items-center gap-2 w-full rounded-lg text-sm text-slate-500 hover:text-slate-700 hover:bg-slate-50 transition-all touch-target ${collapsed ? 'px-0 py-2.5 justify-center' : 'px-3 py-2.5'}`}
             title={collapsed ? '展开侧边栏' : '折叠侧边栏'}
           >
             {collapsed ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
@@ -390,7 +424,7 @@ function LayoutBase({
           {onLogout && (
             <button
               onClick={onLogout}
-              className={`flex items-center gap-2 w-full rounded-lg text-sm text-slate-500 hover:text-red-600 hover:bg-red-50 transition-all ${collapsed ? 'px-0 py-2 justify-center' : 'px-3 py-2'}`}
+              className={`flex items-center gap-2 w-full rounded-lg text-sm text-slate-500 hover:text-red-600 hover:bg-red-50 transition-all touch-target ${collapsed ? 'px-0 py-2.5 justify-center' : 'px-3 py-2.5'}`}
               title="退出登录"
             >
               <LogOut size={18} />
