@@ -1,0 +1,16 @@
+name = "shared-sync-worker"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+
+# D1 数据库绑定（部署唯一需要配置的地方）
+# 1. 创建数据库: npx wrangler d1 create <database_name>
+# 2. 在 Cloudflare Dashboard → Workers & Pages → D1 数据库 页面查看你的 database_name 与 database_id，
+#    把下面的值替换成你自己的即可，无需任何环境变量：
+[[d1_databases]]
+binding = "DB"
+database_name = "shared_sync"
+database_id = "<your-database-id>"
+
+# 可选鉴权 Token：请勿写在 [vars] 里！
+# 用 `npx wrangler secret put SYNC_AUTH_TOKEN` 设置（运行时通过 env.SYNC_AUTH_TOKEN 读取，不进代码库）。
+# 前端同步配置里的 authToken 必须与此一致（留空则不启用鉴权）。

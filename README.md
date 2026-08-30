@@ -137,7 +137,6 @@ import { ConfirmDialog } from '@shared/core';
 ```
 
 ### 渲染模板驱动表单（核心能力）
-### 渲染模板驱动表单（核心能力）
 
 ```tsx
 import { FormRenderer } from '@shared/core';
@@ -187,7 +186,7 @@ const { snapshots, loading, createSnapshot, removeSnapshot } = useSnapshots(reco
 
 ### 全文搜索（需安装 flexsearch）
 
-```tsx
+```ts
 import { useSearch } from '@shared/core/hooks/useSearch';
 
 const results = useSearch(records, query, (r) => `${r.title} ${r.data.description ?? ''}`);
@@ -201,6 +200,77 @@ import { detectLoops } from '@shared/core';
 // causalChain: { factorA, factorB, relationType: 'reinforcing'|'balancing'|'causal'|'none' }[]
 const { loops, leveragePoints } = detectLoops(causalChain);
 ```
+
+## Cloudflare D1 容灾备份/多端同步（可选）
+
+> **前提**：该能力面向使用 **Cloudflare 技术栈（Workers + D1）** 的 **Local-First** 项目——本地 IndexedDB 为主数据源，D1 仅作异地容灾备份与多端同步（冲突策略 Last-Write-Wins，以记录的 `updatedAt`（回退 `createdAt`/`evaluationTime`）为准）。**直接以 D1 为主数据库的项目（如 money-growth-system）无需接入本能力。**
+
+前端同步客户端 = `createD1SyncService`（`services/cloudflareD1.ts`，工厂 + 数据适配器注入，不绑定具体数据模型）；Worker 网关可部署模板 = 本包 `worker/` 目录（独立部署物，不参与消费方构建，也不在 package.json exports 中）。
+
+### 接入三步
+
+**第 1 步：部署 Worker 网关模板（`worker/` 目录）**
+
+```bash
+cd shared-core/worker
+npm install                                  # 安装 wrangler
+npx wrangler d1 create shared_sync           # 创建 D1 数据库
+# 把 wrangler.toml 里的 database_name / database_id 替换成上一步返回的真实值
+npm run db:init                              # 建表（wrangler d1 execute --remote --file=./schema.sql）
+npx wrangler secret put SYNC_AUTH_TOKEN      # 可选：设置访问令牌（前端 authToken 与之一致，跳过则不启用鉴权）
+npm run deploy                               # 部署，得到 https://<name>.<account>.workers.dev
+```
+
+Worker 协议：`POST /api/sync/push`、`GET /api/sync/pull`、`POST /api/sync/backup`、`GET /api/sync/restore`、`GET /api/sync/health`、`GET /api/sync/backups`；账户数据通过 `X-Sync-Account` 头隔离。消费方数据模型与默认的 records + settings 两表不一致时，同步修改 `worker/schema.sql` 与 `worker/src/index.ts` 的 `STORES` 白名单。
+
+**第 2 步：消费方实现数据适配器（或直接用默认适配器）**
+
+- 使用本包 `services/db.ts`（records + settings 结构）的项目**零成本接入**，直接用默认适配器 `createDefaultD1SyncAdapter()`。
+  能力边界：全量备份/恢复覆盖 records + settings；增量推送/拉取仅 records（`getRecordsModifiedSince` 按 `updatedAt` 过滤），settings 无修改时间戳不参与增量，其变更只随下次全量备份上云。
+- 自有数据层的项目实现 `D1SyncDataAdapter`（五个原语：`exportSnapshot` / `importSnapshot` / `getChangesSince` / `getMeta` / `setMeta`）：
+
+```ts
+import { createD1SyncService, type D1SyncDataAdapter } from '@shared/core';
+
+// 以任意本地数据层为例（记录需带字符串 id 与 ISO 时间戳字段）
+const myAdapter: D1SyncDataAdapter = {
+  exportSnapshot: () => myDB.exportAll(),                        // 全量快照: { 表名: 记录数组, ... }
+  importSnapshot: (snap, mode) => myDB.importAll(snap, mode),    // 'replace' 清空后覆盖 / 'merge' upsert
+  getChangesSince: (since) => myDB.changesSince(since),          // since 之后变更的记录快照
+  getMeta: (key, fallback) => myDB.getMeta(key, fallback),       // 元数据读写（配置/时间戳持久化通道）
+  setMeta: (key, value) => myDB.setMeta(key, value),
+};
+```
+
+**第 3 步：创建同步服务并在设置页暴露配置/备份/恢复 UI**
+
+```ts
+import { createD1SyncService, createDefaultD1SyncAdapter } from '@shared/core';
+
+// 标准db.ts用户；accountId 留空时可用 resolveAccountId 注入当前登录账户名（回退 'local-user'）
+export const sync = createD1SyncService(createDefaultD1SyncAdapter(), {
+  resolveAccountId: async () => currentAccount?.username ?? 'local-user',
+});
+
+// App 启动时恢复配置
+await sync.loadSyncConfig();
+
+// 设置页：保存/断开配置
+await sync.configureSync({ apiEndpoint: 'https://xxx.workers.dev', accountId: '', authToken: '' });
+await sync.clearSyncConfig();
+
+// 同步操作（均返回 SyncResult { success, pushed, pulled, conflicts, timestamp, error? }）
+await sync.pushChanges();        // 增量推送
+await sync.pullChanges();        // 增量拉取 + LWW 合并
+await sync.syncBoth();           // 先推后拉
+await sync.fullBackupToD1();     // 全量备份（存为一个历史版本，云端每账户保留最近 20 个）
+await sync.restoreFromD1();      // 恢复最新备份（可传 timestamp 恢复指定备份点）
+await sync.listBackupPoints();   // 历史备份点列表 [{ timestamp, size, records }]
+await sync.getSyncStatus();      // { lastSyncAt, pendingChanges, isOnline }
+await sync.checkHealth();        // 连通性探针
+```
+
+完整 UI 参考蓝本：ability-growth-system 的 `src/pages/SyncPage.tsx`（配置表单 + 同步操作 + 历史备份点）与 `src/hooks/useSyncStatus.tsx`（状态轮询 hook）。
 
 ## 可选依赖
 
@@ -236,7 +306,7 @@ import { useSearch } from '@shared/core/hooks/useSearch';
 ### 服务 (`services/`)
 - `db.ts` — IndexedDB 多账户隔离数据层（可配置数据库前缀，含快照 CRUD：getSnapshotsByRecord/putSnapshot/deleteSnapshot）
 - `auth.ts` — PBKDF2-SHA256 本地认证
-- `cloudflareD1.ts` — Cloudflare D1 远程备份同步
+- `cloudflareD1.ts` — Cloudflare D1 容灾备份/多端同步（`createD1SyncService` 工厂 + `D1SyncDataAdapter` 适配器注入 + `createDefaultD1SyncAdapter` 默认适配器，Local-First，冲突 LWW）
 
 ### Hooks (`hooks/`)
 - `useAuth.tsx` — 认证状态机 Provider + Hook
@@ -259,6 +329,9 @@ import { useSearch } from '@shared/core/hooks/useSearch';
 
 > 注：`CausalGraph`（@xyflow/react）、`RootCauseTypePie`（recharts）、`useSearch`（flexsearch）依赖可选库，
 > 使用方需自行安装对应依赖，并通过子路径导入（如 `@shared/core/components/visualize/CausalGraph`）。
+
+### Worker 网关模板 (`worker/`)
+- Cloudflare Worker + D1 备份/同步网关的可部署模板（`src/index.ts` + `schema.sql` + `wrangler.toml` + `.dev.vars.example`），与 `services/cloudflareD1.ts` 的 API 契约一一对应；独立部署物，不参与消费方构建（详见上文「Cloudflare D1 容灾备份/多端同步」章节）
 
 ## 迁移指南（从本地副本切换到公共包）
 

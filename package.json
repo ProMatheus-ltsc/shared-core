@@ -61,7 +61,8 @@
     "./utils/formValidation": "./src/utils/formValidation.ts",
     "./utils/exportFormatter": "./src/utils/exportFormatter.ts",
     "./utils/loopDetection": "./src/utils/loopDetection.ts",
-    "./utils/suggestions": "./src/utils/suggestions.ts"
+    "./utils/suggestions": "./src/utils/suggestions.ts",
+    "./utils/pdfFont": "./src/utils/pdfFont.ts"
   },
   "devDependencies": {
     "@types/react": "^18.3.3",

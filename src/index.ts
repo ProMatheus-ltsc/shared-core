@@ -25,8 +25,14 @@ export {
 } from './services/db';
 export { registerAccount, verifyAccountPassword, resetAccountPassword } from './services/auth';
 export {
-  configureSyncService, getSyncConfig, getSyncStatus,
-  pushChanges, pullChanges, fullBackupToD1, restoreFromD1,
+  createD1SyncService,
+  createDefaultD1SyncAdapter,
+  type D1SyncDataAdapter,
+  type D1SyncService,
+  type D1SyncServiceOptions,
+  type D1SyncSnapshot,
+  type D1SyncConfig,
+  type BackupPoint,
 } from './services/cloudflareD1';
 
 // Hooks
