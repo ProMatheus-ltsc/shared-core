@@ -117,8 +117,18 @@ export interface D1SyncService {
 
 // meta 持久化键名(与 ability-growth-system 保持一致,便于平滑切换)
 const CONFIG_KEY = 'd1-sync-config';
-const LAST_SYNC_KEY = 'd1-last-sync-at';
+/** push 游标:只由 pushChanges 推进,表示「本地变更已推到云端的截止时间」 */
+const LAST_PUSH_KEY = 'd1-last-push-at';
+/** pull 游标:只由 pullChanges 推进,表示「云端变更已拉到本地的截止时间」 */
+const LAST_PULL_KEY = 'd1-last-pull-at';
 const LAST_BACKUP_KEY = 'd1-last-backup-at';
+/**
+ * 旧版共用的单一游标键。
+ * 历史缺陷:push 与 pull 共用它,导致 push 成功推进后,pull 立刻用新时间戳查询,
+ * 结果永远为空——「双向同步」实际只推不拉。新版拆成两个键,并在首次读取时从
+ * 旧键迁移,避免升级瞬间把历史数据全量重推一遍。
+ */
+const LEGACY_SYNC_KEY = 'd1-last-sync-at';
 
 // ============ 快照通用工具(不绑定具体数据模型) ============
 
@@ -272,10 +282,31 @@ export function createD1SyncService(
     };
   }
 
+  /** 读取游标;首次读不到时从旧版公用键 LAST_SYNC_KEY 迁移,避免升级后全量重推 */
+  async function getCursor(key: string): Promise<string | null> {
+    const value = await adapter.getMeta<string | null>(key, null);
+    if (value) return value;
+    const legacy = await adapter.getMeta<string | null>(LEGACY_SYNC_KEY, null);
+    if (!legacy) return null;
+    await adapter.setMeta(key, legacy);
+    return legacy;
+  }
+
+  const getPushCursor = () => getCursor(LAST_PUSH_KEY);
+  const getPullCursor = () => getCursor(LAST_PULL_KEY);
+
   async function getSyncStatus(): Promise<SyncStatus> {
     const cfg = runtimeConfig;
-    const lastSyncAt = await adapter.getMeta<string | null>(LAST_SYNC_KEY, null);
-    const pending = await adapter.getChangesSince(lastSyncAt);
+    const lastPushAt = await getPushCursor();
+    const lastPullAt = await getPullCursor();
+    // 展示用「上次同步时间」取两者较晚者
+    const lastSyncAt =
+      lastPushAt && lastPullAt
+        ? lastPushAt > lastPullAt
+          ? lastPushAt
+          : lastPullAt
+        : (lastPushAt ?? lastPullAt);
+    const pending = await adapter.getChangesSince(lastPushAt);
     const pendingChanges = totalRecords(pending);
     const isOnline = cfg ? await checkConnectivity(cfg) : false;
     return { lastSyncAt, pendingChanges, isOnline };
@@ -289,8 +320,8 @@ export function createD1SyncService(
     const cfg = runtimeConfig;
     if (!cfg) return emptyResult('未配置 D1 同步服务');
     try {
-      const lastSyncAt = await adapter.getMeta<string | null>(LAST_SYNC_KEY, null);
-      const changes = await adapter.getChangesSince(lastSyncAt);
+      const pushCursor = await getPushCursor();
+      const changes = await adapter.getChangesSince(pushCursor);
       const total = totalRecords(changes);
       if (total === 0) return { ...emptyResult(), success: true };
       const res = await fetch(buildUrl(cfg, '/api/sync/push'), {
@@ -299,14 +330,14 @@ export function createD1SyncService(
         body: JSON.stringify({
           accountId: await resolveAccountId(cfg),
           snapshot: changes,
-          since: lastSyncAt,
+          since: pushCursor,
           timestamp: new Date().toISOString(),
         }),
       });
       if (!res.ok) throw new Error(`推送失败(HTTP ${res.status}): ${await res.text()}`);
       const body = (await res.json()) as { conflicts?: number };
       const now = new Date().toISOString();
-      await adapter.setMeta(LAST_SYNC_KEY, now);
+      await adapter.setMeta(LAST_PUSH_KEY, now);
       return { success: true, pushed: total, pulled: 0, conflicts: body.conflicts ?? 0, timestamp: now };
     } catch (e) {
       return emptyResult(e instanceof Error ? e.message : '未知错误');
@@ -317,9 +348,10 @@ export function createD1SyncService(
     const cfg = runtimeConfig;
     if (!cfg) return emptyResult('未配置 D1 同步服务');
     try {
-      const lastSyncAt = await adapter.getMeta<string | null>(LAST_SYNC_KEY, null);
+      // 用独立的 pull 游标:push 刚推进过时间戳也不会让本次拉取变成空查询
+      const pullCursor = await getPullCursor();
       const res = await fetch(
-        buildUrl(cfg, '/api/sync/pull', { accountId: await resolveAccountId(cfg), since: lastSyncAt ?? undefined }),
+        buildUrl(cfg, '/api/sync/pull', { accountId: await resolveAccountId(cfg), since: pullCursor ?? undefined }),
         { headers: await authHeaders(cfg) },
       );
       if (!res.ok) throw new Error(`拉取失败(HTTP ${res.status}): ${await res.text()}`);
@@ -330,7 +362,7 @@ export function createD1SyncService(
       await adapter.importSnapshot(merged.snapshot, 'replace');
 
       const now = new Date().toISOString();
-      await adapter.setMeta(LAST_SYNC_KEY, now);
+      await adapter.setMeta(LAST_PULL_KEY, now);
       return { success: true, pushed: 0, pulled: merged.pulled, conflicts: merged.conflicts, timestamp: now };
     } catch (e) {
       return emptyResult(e instanceof Error ? e.message : '未知错误');
@@ -359,7 +391,8 @@ export function createD1SyncService(
       });
       if (!res.ok) throw new Error(`备份失败(HTTP ${res.status}): ${await res.text()}`);
       const now = new Date().toISOString();
-      await adapter.setMeta(LAST_SYNC_KEY, now);
+      // 只记录备份时间,绝不推进 push/pull 游标:
+      // 全量备份写的是 sync_backups 表,不改变业务表;推进游标会让尚未推送的变更永久丢失。
       await adapter.setMeta(LAST_BACKUP_KEY, now);
       return { success: true, pushed: totalRecords(snapshot), pulled: 0, conflicts: 0, timestamp: now };
     } catch (e) {
@@ -379,7 +412,9 @@ export function createD1SyncService(
       const snapshot = (await res.json()) as D1SyncSnapshot;
       await adapter.importSnapshot(snapshot, 'replace');
       const now = new Date().toISOString();
-      await adapter.setMeta(LAST_SYNC_KEY, now);
+      // 恢复后本地内容与云端一致,两个游标都推进
+      await adapter.setMeta(LAST_PUSH_KEY, now);
+      await adapter.setMeta(LAST_PULL_KEY, now);
       return { success: true, pushed: 0, pulled: totalRecords(snapshot), conflicts: 0, timestamp: now };
     } catch (e) {
       return emptyResult(e instanceof Error ? e.message : '未知错误');
