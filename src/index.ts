@@ -95,6 +95,8 @@ export { MatrixHeatmap } from './components/visualize/MatrixHeatmap';
 export { FishboneDiagram } from './components/visualize/FishboneDiagram';
 export { ComparisonDiffChart } from './components/visualize/ComparisonDiffChart';
 export { TimelineChart } from './components/visualize/TimelineChart';
+export { Timeline } from './components/Timeline';
+export type { TimelineItem, TimelineProps, TimelineTone } from './components/Timeline';
 export { WhyLadderChart } from './components/visualize/WhyLadderChart';
 export { LoopDiagram } from './components/visualize/LoopDiagram';
 
