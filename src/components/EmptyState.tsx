@@ -4,16 +4,19 @@
  *
  * - 带 icon：圆形图标底 + 标题 + 描述 + 可选操作按钮（原 ability 风格）
  * - 无 icon：虚线边框卡片 + 标题 + 描述 + 可选操作（原 money 风格）
+ *
+ * icon 类型刻意不绑定 lucide-react 的 LucideIcon：
+ * 各消费方的 lucide-react 版本可能不同（如 0.4xx / 1.xx），
+ * 直接引用 LucideIcon 会因基座自身安装的副本版本不一致而产生类型冲突。
  */
-import type { LucideIcon } from 'lucide-react';
-import type { ReactNode } from 'react';
+import type { ComponentType, ReactNode } from 'react';
 
 interface EmptyStateProps {
   title: string;
   description?: string;
   action?: ReactNode;
-  /** 可选图标（传入后渲染圆形图标底样式） */
-  icon?: LucideIcon;
+  /** 可选图标（传入后渲染圆形图标底样式）；兼容任意图标库的 size 组件 */
+  icon?: ComponentType<{ size?: number | string; className?: string }>;
 }
 
 export function EmptyState({ title, description, action, icon: Icon }: EmptyStateProps) {
