@@ -20,6 +20,10 @@ interface EmptyStateProps {
 }
 
 export function EmptyState({ title, description, action, icon: Icon }: EmptyStateProps) {
+  // 兜底：title 传空串/空白时（如后端返回空 message 被直接透传）会渲染出一块
+  // 没有文字的虚线框，看起来像渲染 bug。统一兜底成可读文案。
+  const heading = title?.trim() || '暂无数据';
+  const desc = description?.trim();
   return (
     <div
       className={
@@ -34,11 +38,11 @@ export function EmptyState({ title, description, action, icon: Icon }: EmptyStat
         </div>
       )}
       <p className={Icon ? 'text-base font-semibold text-slate-800' : 'text-sm font-medium text-slate-700'}>
-        {title}
+        {heading}
       </p>
-      {description && (
+      {desc && (
         <p className={Icon ? 'mt-2 max-w-md text-sm text-slate-500' : 'max-w-md text-xs text-slate-400'}>
-          {description}
+          {desc}
         </p>
       )}
       {action && <div className={Icon ? 'mt-4' : 'mt-3'}>{action}</div>}
