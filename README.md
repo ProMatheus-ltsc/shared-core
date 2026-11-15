@@ -265,11 +265,19 @@ const driver = createLocalAuthDriver({
 - 响应信封 `{ success: true, data }` / `{ success: false, error: { code, message } }`
 - 端点：`POST /auth/register`、`/auth/login`、`/auth/logout`、`GET /auth/me`、`POST /auth/password/forgot`、`/auth/password/reset`
 
-**迁移友好**：`verifyPassword` 认全部三种历史格式，老用户迁移当天不会被锁在门外——
+**迁移友好**：`verifyPassword` 认全部历史格式，老用户迁移当天不会被锁在门外——
 
-1. `pbkdf2-sha256$...$...$...`（ability / civil，统一格式）
-2. 裸 hex 摘要 + 独立 `salt` 列（money-growth）
-3. `<base64salt>:<base64hash>`（personal_review_system）
+| # | 存储形态 | 来自 |
+|---|---|---|
+| 1 | `pbkdf2-sha256$<iter>$<b64 salt>$<b64 hash>` | civil / ability（当前统一格式） |
+| 2 | 裸 hex 摘要 + 独立 `salt` 列 | money-growth-system |
+| 3 | `<b64 salt>:<b64 hash>` | personal_review_system（本地） |
+| 4 | base64url 摘要 + 独立 `salt` 列 | quant-trading-agent/journal |
+
+格式 2/4 还需匹配两项参数，否则派生结果不同、老用户登不进来：
+
+- **迭代次数**：默认 100000；项目若把迭代次数存进独立列，必须传实际值
+- **盐的字节处理**：`'bytes'`（解码后参与派生，默认）或 `'utf8'`（盐是字符串，取其 UTF-8 字节）
 
 ### 表结构：沿用项目既有列，不改数据库
 
@@ -336,13 +344,13 @@ const USER_SHAPE = {
 
 | 项目 | 形态 | 偏离点 |
 |---|---|---|
-| civil-exam-drill | 服务端 REST + HttpOnly Cookie | 登录标识是邮箱（`email_normalized`）；昵称在邀请码范围内唯一；密码重置走 Resend |
+| civil-exam-drill | 服务端 REST + HttpOnly Cookie | 登录标识是邮箱（沿用既有 `email_normalized` 列）；昵称在邀请码范围内唯一；密码重置走 Resend |
 | ability-growth-system | 服务端 REST + HttpOnly Cookie | 用户档案带 `role` / `grade_level`；workspace 由服务端从会话推导 |
 | money-growth-system | 服务端 REST + **Bearer token** | **Bearer 而非 Cookie**——运维脚本等非浏览器客户端需要 `Authorization` 头；**未开放自助注册**（账号由管理员预置） |
 | root-cause-analysis | 本地 IndexedDB | 哈希 hex 格式（盐与哈希分列）；会话键 `rca-current-account-id` |
 | personal_review_system | 本地 IndexedDB | 哈希 base64 格式（盐在哈希串里）；会话介质 sessionStorage；账户 id 即用户名 |
-| quant-trading-system | 自建（Node + Express + SQLite + JWT + bcrypt） | 技术栈不兼容 Cloudflare D1；**渐进迁移**——认统一格式，新注册用统一格式，bcrypt 老用户登录成功后就地升级 |
-| quant-trading-agent/journal | 自建（JS + D1） | 两阶段邮箱验证注册（统一契约未覆盖）；且该目录不在本仓库交付锁范围内 |
+| quant-trading-system | 自建（Node + Express + SQLite + JWT） | 技术栈不兼容 Cloudflare D1；**密码哈希渐进迁移**——认统一格式，新注册用统一格式，bcrypt 老用户登录成功后就地升级 |
+| quant-trading-agent/journal | 自建（JS + D1） | 两阶段邮箱验证注册（统一契约已支持）；users 表用 `email` 作登录名、sessions 以 `token_hash` 作主键 |
 
 
 ## Cloudflare D1 容灾备份/多端同步（可选）
@@ -457,7 +465,7 @@ import { useSearch } from '@shared/core/hooks/useSearch';
 - `auth/localDriver.ts` — 本地（IndexedDB）驱动，支持 `hex` / `base64` 两种历史哈希格式与两种会话介质
 - `auth/restDriver.ts` — 服务端（REST + HttpOnly Cookie）驱动，端点前缀可配
 - `auth/AuthProvider.tsx` — 统一四态状态机 Provider + `useAuth` / `useAuthUser` / `useAuthRole`
-- `server/authCore.ts` — 密码哈希（含三种历史格式互认）、会话令牌、Cookie 助手、响应信封
+- `server/authCore.ts` — 密码哈希（认四种历史格式）、会话令牌、Cookie 助手、响应信封
 - `server/authDb.ts` — D1 用户/会话/限流表操作；`UserShape` 声明表形状，**不改消费方数据库**
 - `server/authRoutes.ts` — 6 个认证端点的框架无关分发
 
