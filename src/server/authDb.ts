@@ -87,6 +87,12 @@ export interface ResolvedSession {
 export interface UserShape {
   /** 登录名归一化列名，默认 'username_normalized' */
   usernameColumn?: string;
+  /**
+   * 登录名（展示用）列名，默认 'username'。
+   * 设为 null 表示该表没有这一列——例如以邮箱为登录标识、
+   * 另设 nickname 列作展示名的表。
+   */
+  usernameDisplayColumn?: string | null;
   /** 独立盐列名；为 null 表示盐内嵌在 password_hash 里 */
   saltColumn?: string | null;
   /** 是否有 last_login_at 列 */
@@ -100,6 +106,7 @@ export interface UserShape {
 /** 默认形状：多数项目 */
 export const DEFAULT_USER_SHAPE: UserShape = {
   usernameColumn: 'username_normalized',
+  usernameDisplayColumn: 'username',
   saltColumn: null,
   hasLastLoginAt: true,
   hasStatusColumn: false,
@@ -132,9 +139,18 @@ function nowIso(): string {
  * @param prefix 列名前缀。JOIN 查询里必须带表别名（u.），
  *   否则 SQLite 会因为 id / created_at 等列在两张表里都存在而报
  *   "ambiguous column name"。
+ * @param shape 表形状。登录名列名随项目而异（有的用 username_normalized，
+ *   有的用 email_normalized），按形状取列，避免引用不存在的列。
  */
-function userColumns(extra?: string[], prefix = ''): string {
-  const base = ['id', 'username', 'username_normalized', 'password_hash', 'created_at', 'last_login_at'];
+function userColumns(extra?: string[], prefix = '', shape?: UserShape): string {
+  const usernameColumn = shape?.usernameColumn ?? 'username_normalized';
+  const displayColumn = shape?.usernameDisplayColumn === undefined
+    ? 'username'
+    : shape.usernameDisplayColumn;
+  const base = ['id', usernameColumn];
+  if (displayColumn && displayColumn !== usernameColumn) base.push(displayColumn);
+  base.push('password_hash', 'created_at');
+  if (shape?.hasLastLoginAt !== false) base.push('last_login_at');
   const all = extra && extra.length > 0 ? [...base, ...extra] : base;
   return all.map((column) => `${prefix}${column}`).join(',');
 }
@@ -197,6 +213,33 @@ export async function pruneSessionsForUser(
 }
 
 /**
+ * 执行一条会引用 users 表列的查询。
+ *
+ * 共享包默认按 `username_normalized` 取列，但各项目的 users 表列名不同
+ * （有的是 email_normalized、有的没有展示名列）。调用方漏传 userShape 时，
+ * SQLite 会报 "no such column: u.username_normalized" —— 很难看出是漏传参数。
+ * 这里把错误翻译成能直接定位的提示。
+ */
+async function queryUsers<T>(
+  db: D1Like,
+  sql: string,
+  values: unknown[],
+): Promise<T | null> {
+  try {
+    return await db.prepare(sql).bind(...values).first<T>();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes('no such column')) {
+      throw new Error(
+        `users 表查询失败（${message}）——该项目的登录名列名与默认形状不同，` +
+          `请在调用时传 userShape（usernameColumn / usernameDisplayColumn / hasStatusColumn）`,
+      );
+    }
+    throw error;
+  }
+}
+
+/**
  * 解析会话 token → 会话与用户。
  *
  * - token 哈希后查表
@@ -215,16 +258,15 @@ export async function resolveSession(
   const statusFilter = userShape.hasStatusColumn
     ? " AND u.status='active'"
     : "";
-  const row = await db
-    .prepare(
-      `SELECT s.id AS session_id, s.user_id, s.token_hash, s.expires_at,
-              ${userColumns(options.userExtraColumns, 'u.')}
-         FROM sessions s
-         JOIN users u ON u.id = s.user_id
-        WHERE s.token_hash = ?${statusFilter}`,
-    )
-    .bind(tokenHash)
-    .first<Record<string, unknown>>();
+  const row = await queryUsers<Record<string, unknown>>(
+    db,
+    `SELECT s.id AS session_id, s.user_id, s.token_hash, s.expires_at,
+            ${userColumns(options.userExtraColumns, 'u.', userShape)}
+       FROM sessions s
+       JOIN users u ON u.id = s.user_id
+      WHERE s.token_hash = ?${statusFilter}`,
+    [tokenHash],
+  );
 
   if (!row) return null;
 
@@ -235,10 +277,18 @@ export async function resolveSession(
     return null;
   }
 
+  // 登录名列名随项目而异：username_normalized / email_normalized …
+  const usernameColumn = userShape.usernameColumn ?? 'username_normalized';
+  const displayColumn = userShape.usernameDisplayColumn === undefined
+    ? 'username'
+    : userShape.usernameDisplayColumn;
+  const normalized = String(row[usernameColumn] ?? '');
+  const display = displayColumn ? String(row[displayColumn] ?? normalized) : normalized;
+
   const user: AuthUserRow = {
     id: String(row.id),
-    username: String(row.username),
-    username_normalized: String(row.username_normalized ?? row.username),
+    username: display,
+    username_normalized: normalized,
     password_hash: String(row.password_hash),
     created_at: String(row.created_at ?? ''),
     last_login_at: String(row.last_login_at ?? ''),
@@ -252,7 +302,7 @@ export async function resolveSession(
 
   return {
     userId: String(row.user_id),
-    username: String(row.username),
+    username: display,
     tokenHash: String(row.token_hash),
     expiresAt,
     user,
@@ -272,12 +322,11 @@ export async function findUserByUsername(
 ): Promise<AuthUserRow | null> {
   const userShape = options.userShape ?? DEFAULT_USER_SHAPE;
   const column = userShape.usernameColumn ?? 'username_normalized';
-  const row = await db
-    .prepare(`SELECT ${userColumns(options.userExtraColumns)} FROM users WHERE ${column} = ?`)
-    .bind(
-      column === 'username' ? username : username.toLocaleLowerCase('en-US'),
-    )
-    .first<AuthUserRow>();
+  const row = await queryUsers<AuthUserRow>(
+    db,
+    `SELECT ${userColumns(options.userExtraColumns, '', userShape)} FROM users WHERE ${column} = ?`,
+    [column === 'username' ? username : username.toLocaleLowerCase('en-US')],
+  );
   return row ?? null;
 }
 
@@ -287,10 +336,12 @@ export async function findUserById(
   id: string,
   options: SessionOptions = {},
 ): Promise<AuthUserRow | null> {
-  const row = await db
-    .prepare(`SELECT ${userColumns(options.userExtraColumns)} FROM users WHERE id = ?`)
-    .bind(id)
-    .first<AuthUserRow>();
+  const userShape = options.userShape ?? DEFAULT_USER_SHAPE;
+  const row = await queryUsers<AuthUserRow>(
+    db,
+    `SELECT ${userColumns(options.userExtraColumns, '', userShape)} FROM users WHERE id = ?`,
+    [id],
+  );
   return row ?? null;
 }
 
@@ -310,6 +361,9 @@ export async function insertUser(
 ): Promise<void> {
   const userShape = options.userShape ?? DEFAULT_USER_SHAPE;
   const usernameColumn = userShape.usernameColumn ?? 'username_normalized';
+  const displayColumn = userShape.usernameDisplayColumn === undefined
+    ? 'username'
+    : userShape.usernameDisplayColumn;
   const extraEntries = Object.entries(user.extra ?? {});
   const columns: string[] = [];
   const values: unknown[] = [];
@@ -318,9 +372,11 @@ export async function insertUser(
     columns.push('id');
     values.push(user.id);
   }
-  columns.push('username');
-  values.push(user.username);
-  if (usernameColumn !== 'username') {
+  if (displayColumn) {
+    columns.push(displayColumn);
+    values.push(user.username);
+  }
+  if (usernameColumn !== displayColumn) {
     columns.push(usernameColumn);
     values.push(user.username.toLocaleLowerCase('en-US'));
   }
