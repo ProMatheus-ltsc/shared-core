@@ -7,7 +7,7 @@
  * 但改为实现 AuthDriver 接口，从而与 REST 驱动可互换。
  */
 import { v4 as uuidv4 } from 'uuid';
-import type { AuthDriver, AuthCredential, AuthRegisterPayload, AuthResetPayload, AuthUser } from './types.ts';
+import type { AuthDriver, AuthCredential, AuthRegisterPayload, AuthRegisterResult, AuthResetPayload, AuthUser } from './types.ts';
 import { AuthError, AUTH_ERROR_CODES } from './types.ts';
 
 /**
@@ -243,7 +243,7 @@ async function checkLocalHash(
  * 这里收窄一下类型，消费方就不必到处写 `driver.register!`。
  */
 export interface LocalAuthDriver extends AuthDriver {
-  register(payload: AuthRegisterPayload): Promise<AuthUser>;
+  register(payload: AuthRegisterPayload): Promise<AuthRegisterResult>;
   resetPassword(payload: AuthResetPayload): Promise<void>;
 }
 
@@ -294,7 +294,7 @@ export function createLocalAuthDriver(options: LocalAuthDriverOptions): LocalAut
       return toUser(account);
     },
 
-    async register(payload: AuthRegisterPayload): Promise<AuthUser> {
+    async register(payload: AuthRegisterPayload): Promise<AuthRegisterResult> {
       const existing = await store.findByUsername(payload.username);
       if (existing) {
         throw new AuthError(AUTH_ERROR_CODES.INVALID_CREDENTIALS, '用户名已存在');
@@ -312,7 +312,8 @@ export function createLocalAuthDriver(options: LocalAuthDriverOptions): LocalAut
       await store.put(account);
       activate(account.id);
       session.set(account.id);
-      return toUser(account);
+      // 本地注册一步到位，没有验证环节
+      return { status: 'created', user: toUser(account) };
     },
 
     async logout(): Promise<void> {

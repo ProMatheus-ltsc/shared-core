@@ -14,8 +14,10 @@ export type {
   AuthDriver,
   AuthCredential,
   AuthRegisterPayload,
+  AuthRegisterResult,
   AuthResetPayload,
   AuthResetRequest,
+  AuthVerifyPayload,
   AuthErrorCode,
 } from './types.ts';
 export { AuthError, AUTH_ERROR_CODES } from './types.ts';

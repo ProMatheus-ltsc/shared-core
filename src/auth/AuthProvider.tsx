@@ -37,6 +37,17 @@ export interface AuthContextValue {
   register: (username: string, password: string) => Promise<boolean>;
   /** 带完整载荷的注册（支持 email / displayName / extra） */
   registerWith: (payload: AuthRegisterPayload) => Promise<boolean>;
+  /**
+   * 完成两阶段注册的验证步骤（邮箱验证码等）。
+   *
+   * 先调 register：若返回 `status: 'pending'`，说明账号待验证，
+   * Provider 会记下受理凭据，随后调 verify 完成。
+   */
+  verify: (code: string) => Promise<boolean>;
+  /** 当前是否处于「已提交注册、待验证」状态 */
+  awaitingVerification: boolean;
+  /** 待验证时的提示文案（如「验证码已发送到邮箱」） */
+  notice: string | null;
   logout: () => Promise<void>;
   resetPassword: (username: string, newPassword: string) => Promise<boolean>;
   /**
@@ -73,6 +84,9 @@ export function AuthProvider({ driver, errorMode = 'boolean', children }: AuthPr
   const [user, setUser] = useState<AuthUser | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [errorCode, setErrorCode] = useState<string | null>(null);
+  // 两阶段注册：已提交注册但还没完成验证时的受理凭据
+  const [pendingVerify, setPendingVerify] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const clearError = useCallback(() => {
     setError(null);
@@ -166,8 +180,14 @@ export function AuthProvider({ driver, errorMode = 'boolean', children }: AuthPr
         );
       }
       try {
-        const next = await driver.register(payload);
-        setUser(next);
+        const result = await driver.register(payload);
+        if (result.status === 'pending') {
+          // 两阶段注册：账号还没建好，等用户完成验证（邮箱验证码等）
+          setPendingVerify(result.pendingId ?? payload.username);
+          setNotice(result.notice ?? null);
+          return false;
+        }
+        setUser(result.user ?? null);
         setState('authenticated');
         return true;
       } catch (e) {
@@ -182,6 +202,36 @@ export function AuthProvider({ driver, errorMode = 'boolean', children }: AuthPr
     [registerWith],
   );
 
+  /** 完成两阶段注册的验证步骤 */
+  const verify = useCallback(
+    async (code: string) => {
+      clearError();
+      if (!driver.verify) {
+        return handleFailure(
+          new AuthError(AUTH_ERROR_CODES.INVALID_REQUEST, '当前系统不需要验证步骤'),
+          '当前系统不需要验证步骤',
+        );
+      }
+      if (!pendingVerify) {
+        return handleFailure(
+          new AuthError(AUTH_ERROR_CODES.INVALID_REQUEST, '没有待验证的注册'),
+          '没有待验证的注册',
+        );
+      }
+      try {
+        const next = await driver.verify({ pendingId: pendingVerify, code });
+        setUser(next);
+        setState('authenticated');
+        setPendingVerify(null);
+        setNotice(null);
+        return true;
+      } catch (e) {
+        return handleFailure(e, '验证失败');
+      }
+    },
+    [driver, pendingVerify, clearError, handleFailure],
+  );
+
   const logout = useCallback(async () => {
     clearError();
     try {
@@ -190,6 +240,8 @@ export function AuthProvider({ driver, errorMode = 'boolean', children }: AuthPr
       captureError(e, '登出失败');
     }
     setUser(null);
+    setPendingVerify(null);
+    setNotice(null);
     setState('login');
   }, [driver, clearError, captureError]);
 
@@ -217,6 +269,9 @@ export function AuthProvider({ driver, errorMode = 'boolean', children }: AuthPr
       login,
       register,
       registerWith,
+      verify,
+      awaitingVerification: pendingVerify !== null,
+      notice,
       logout,
       resetPassword,
       refresh,
@@ -230,6 +285,9 @@ export function AuthProvider({ driver, errorMode = 'boolean', children }: AuthPr
       login,
       register,
       registerWith,
+      verify,
+      pendingVerify,
+      notice,
       logout,
       resetPassword,
       refresh,

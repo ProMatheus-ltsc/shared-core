@@ -59,13 +59,46 @@ export interface AuthDriver {
    * 驱动不提供时，AuthProvider 的 register/registerWith 会返回 false 并
    * 在 error 字段给出说明。
    */
-  register?(payload: AuthRegisterPayload): Promise<AuthUser>;
+  register?(payload: AuthRegisterPayload): Promise<AuthRegisterResult>;
+  /**
+   * 完成注册验证（两阶段注册的第二步）。
+   *
+   * **可选**：驱动不支持时，AuthProvider 的 verify 返回 false。
+   */
+  verify?(payload: AuthVerifyPayload): Promise<AuthUser>;
   /** 登出；后端清 Cookie，前端清本地态 */
   logout(): Promise<void>;
   /** 重置密码（可选实现） */
   resetPassword?(payload: AuthResetPayload): Promise<void>;
   /** 发送重置邮件 / 验证码（可选实现，服务端模式用） */
   requestPasswordReset?(payload: AuthResetRequest): Promise<void>;
+}
+
+/**
+ * 注册结果。
+ *
+ * 有些系统注册不是一步到位的——邮箱注册需要先验证验证码才能真正建号
+ * （quant-trading-agent/journal 就是两阶段）。
+ *
+ * - `status: 'created'`  —— 账号已建好并登录
+ * - `status: 'pending'`  —— 已受理，需先完成验证（如邮箱验证码）才能登录；
+ *                            `pendingId` 是驱动内部的受理凭据，交给 verify 用
+ */
+export interface AuthRegisterResult {
+  status: 'created' | 'pending';
+  user?: AuthUser;
+  /** 待验证时的受理凭据（由驱动自己解释） */
+  pendingId?: string;
+  /** 待验证时给用户看的说明（如「验证码已发送到邮箱」） */
+  notice?: string;
+}
+
+/** 完成注册验证的入参 */
+export interface AuthVerifyPayload {
+  /** 驱动返回的受理凭据 */
+  pendingId: string;
+  /** 验证码 / 邀请码等 */
+  code: string;
 }
 
 /** 登录凭据 */

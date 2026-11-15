@@ -14,9 +14,11 @@ import type {
   AuthDriver,
   AuthCredential,
   AuthRegisterPayload,
+  AuthRegisterResult,
   AuthResetPayload,
   AuthResetRequest,
   AuthUser,
+  AuthVerifyPayload,
 } from './types.ts';
 import { AuthError, AUTH_ERROR_CODES } from './types.ts';
 
@@ -128,16 +130,36 @@ export function createRestAuthDriver(options: RestAuthDriverOptions = {}): AuthD
       return mapUser(raw);
     },
 
-    async register(payload: AuthRegisterPayload): Promise<AuthUser> {
-      const raw = await request<AuthUserPayload>(`${basePath}/register`, {
+    async register(payload: AuthRegisterPayload): Promise<AuthRegisterResult> {
+      const raw = await request<AuthUserPayload | { user?: AuthUserPayload; needs_verification?: boolean; pending_id?: string; notice?: string }>(
+        `${basePath}/register`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            username: payload.username,
+            password: payload.password,
+            email: payload.email,
+            nickname: payload.displayName,
+            ...(payload.extra ?? {}),
+          }),
+        },
+      );
+      // 两阶段注册：后端返回 needs_verification 表示账号待验证
+      const envelope = raw as { user?: AuthUserPayload; needs_verification?: boolean; pending_id?: string; notice?: string };
+      if (envelope?.needs_verification) {
+        return {
+          status: 'pending',
+          pendingId: envelope.pending_id ?? payload.username,
+          notice: envelope.notice ?? undefined,
+        };
+      }
+      return { status: 'created', user: mapUser(raw as AuthUserPayload) };
+    },
+
+    async verify(payload: AuthVerifyPayload): Promise<AuthUser> {
+      const raw = await request<AuthUserPayload>(`${basePath}/verify`, {
         method: 'POST',
-        body: JSON.stringify({
-          username: payload.username,
-          password: payload.password,
-          email: payload.email,
-          nickname: payload.displayName,
-          ...(payload.extra ?? {}),
-        }),
+        body: JSON.stringify({ pending_id: payload.pendingId, code: payload.code }),
       });
       return mapUser(raw);
     },
