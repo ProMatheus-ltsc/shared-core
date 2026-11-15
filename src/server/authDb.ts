@@ -76,6 +76,35 @@ export interface ResolvedSession {
   user: AuthUserRow;
 }
 
+/**
+ * users 表形状。
+ *
+ * 统一契约的核心不变：id 是 TEXT、username_normalized 唯一、
+ * password_hash 自带盐、token 只存哈希。以下开关只覆盖**项目特有的表结构差异**，
+ * 由项目自己声明，共享包不硬编码任何项目。
+ */
+export interface UserShape {
+  /** 登录名归一化列名，默认 'username_normalized' */
+  usernameColumn?: string;
+  /** 独立盐列名；为 null 表示盐内嵌在 password_hash 里 */
+  saltColumn?: string | null;
+  /** 是否有 last_login_at 列 */
+  hasLastLoginAt?: boolean;
+  /** 是否有 status 列（'active'/'disabled'）；有则禁用账户的会话立即失效 */
+  hasStatusColumn?: boolean;
+  /** id 列类型：TEXT（默认）或 INTEGER 自增 */
+  idMode?: 'text' | 'autoincrement';
+}
+
+/** 默认形状：多数项目 */
+export const DEFAULT_USER_SHAPE: UserShape = {
+  usernameColumn: 'username_normalized',
+  saltColumn: null,
+  hasLastLoginAt: true,
+  hasStatusColumn: false,
+  idMode: 'text',
+};
+
 /** 会话选项 */
 export interface SessionOptions {
   /** 会话有效期天数，默认 30 */
@@ -86,6 +115,10 @@ export interface SessionOptions {
   pruneExpiredGlobally?: boolean;
   /** users 表额外列（SELECT 时一并带出） */
   userExtraColumns?: string[];
+  /** users 表形状，默认通用契约 */
+  userShape?: UserShape;
+  /** 生成会话 id */
+  generateSessionId?: () => string;
 }
 
 function nowIso(): string {
@@ -161,13 +194,18 @@ export async function resolveSession(
   options: SessionOptions = {},
 ): Promise<ResolvedSession | null> {
   if (!token) return null;
+  const userShape = options.userShape ?? DEFAULT_USER_SHAPE;
+  // 被禁用（status='disabled'）的账户，其会话立即失效
+  const statusFilter = userShape.hasStatusColumn
+    ? " AND u.status='active'"
+    : "";
   const row = await db
     .prepare(
       `SELECT s.id AS session_id, s.user_id, s.token_hash, s.expires_at,
               ${userColumns(options.userExtraColumns)}
          FROM sessions s
          JOIN users u ON u.id = s.user_id
-        WHERE s.token_hash = ?`,
+        WHERE s.token_hash = ?${statusFilter}`,
     )
     .bind(tokenHash)
     .first<Record<string, unknown>>();
@@ -216,9 +254,13 @@ export async function findUserByUsername(
   username: string,
   options: SessionOptions = {},
 ): Promise<AuthUserRow | null> {
+  const userShape = options.userShape ?? DEFAULT_USER_SHAPE;
+  const column = userShape.usernameColumn ?? 'username_normalized';
   const row = await db
-    .prepare(`SELECT ${userColumns(options.userExtraColumns)} FROM users WHERE username_normalized = ?`)
-    .bind(username.toLocaleLowerCase('en-US'))
+    .prepare(`SELECT ${userColumns(options.userExtraColumns)} FROM users WHERE ${column} = ?`)
+    .bind(
+      column === 'username' ? username : username.toLocaleLowerCase('en-US'),
+    )
     .first<AuthUserRow>();
   return row ?? null;
 }
@@ -243,21 +285,41 @@ export async function insertUser(
     id: string;
     username: string;
     passwordHash: string;
+    /** 独立盐列的值（当 userShape.saltColumn 非 null 时使用） */
+    salt?: string;
     /** 项目特有列，如 { email, nickname, status, role, grade_level } */
     extra?: Record<string, unknown>;
   },
   options: SessionOptions = {},
 ): Promise<void> {
+  const userShape = options.userShape ?? DEFAULT_USER_SHAPE;
+  const usernameColumn = userShape.usernameColumn ?? 'username_normalized';
   const extraEntries = Object.entries(user.extra ?? {});
-  const columns = ['id', 'username', 'username_normalized', 'password_hash', 'created_at', 'last_login_at'];
-  const values: unknown[] = [
-    user.id,
-    user.username,
-    user.username.toLocaleLowerCase('en-US'),
-    user.passwordHash,
-    nowIso(),
-    nowIso(),
-  ];
+  const columns: string[] = [];
+  const values: unknown[] = [];
+
+  if (userShape.idMode !== 'autoincrement') {
+    columns.push('id');
+    values.push(user.id);
+  }
+  columns.push('username');
+  values.push(user.username);
+  if (usernameColumn !== 'username') {
+    columns.push(usernameColumn);
+    values.push(user.username.toLocaleLowerCase('en-US'));
+  }
+  columns.push('password_hash');
+  values.push(user.passwordHash);
+  if (userShape.saltColumn) {
+    columns.push(userShape.saltColumn);
+    values.push(user.salt ?? '');
+  }
+  columns.push('created_at');
+  values.push(nowIso());
+  if (userShape.hasLastLoginAt !== false) {
+    columns.push('last_login_at');
+    values.push(nowIso());
+  }
   for (const [key, value] of extraEntries) {
     columns.push(key);
     values.push(value);
@@ -269,8 +331,14 @@ export async function insertUser(
     .run();
 }
 
-/** 更新最后登录时间 */
-export async function touchLastLogin(db: D1Like, userId: string): Promise<void> {
+/** 更新最后登录时间（无该列的表直接跳过） */
+export async function touchLastLogin(
+  db: D1Like,
+  userId: string,
+  options: SessionOptions = {},
+): Promise<void> {
+  const userShape = options.userShape ?? DEFAULT_USER_SHAPE;
+  if (userShape.hasLastLoginAt === false) return;
   await db.prepare('UPDATE users SET last_login_at = ? WHERE id = ?').bind(nowIso(), userId).run();
 }
 
@@ -299,21 +367,39 @@ export async function authAttemptsExceeded(
   return Number(row?.cnt ?? 0) >= limit;
 }
 
-/** 记录一次认证尝试 */
+/**
+ * 记录一次认证尝试。
+ *
+ * @param scope 限流维度（如 'register' / 'login'），会作为 client_key 的前缀
+ * @param clientKey 客户端标识（通常为 IP 的 sha256）
+ */
 export async function recordAuthAttempt(
   db: D1Like,
   scope: string,
   clientKey: string,
   succeeded: boolean,
 ): Promise<void> {
+  await recordAuthAttemptRaw(db, `${scope}:${clientKey}`, succeeded);
+}
+
+/**
+ * 记录一次认证尝试（client_key 原样写入，不加 scope 前缀）。
+ *
+ * 供已经把 scope 拼进 key 的项目直接使用，避免出现 `register:register:xxx`
+ * 这种双前缀。
+ *
+ * 注意：`id` 列不显式插入。auth_attempts.id 在各项目都是
+ * `INTEGER PRIMARY KEY AUTOINCREMENT`（SQLite 的 rowid 别名），
+ * 往里插字符串会直接报 datatype mismatch，让 id 由数据库自增。
+ */
+export async function recordAuthAttemptRaw(
+  db: D1Like,
+  clientKey: string,
+  succeeded: boolean,
+): Promise<void> {
   await db
-    .prepare('INSERT INTO auth_attempts (id,client_key,succeeded,created_at) VALUES (?,?,?,?)')
-    .bind(
-      `att_${crypto.randomUUID()}`,
-      `${scope}:${clientKey}`,
-      succeeded ? 1 : 0,
-      nowIso(),
-    )
+    .prepare('INSERT INTO auth_attempts (client_key,succeeded,created_at) VALUES (?,?,?)')
+    .bind(clientKey, succeeded ? 1 : 0, nowIso())
     .run();
 }
 
