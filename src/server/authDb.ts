@@ -125,10 +125,17 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
-/** users 表 SELECT 列 */
-function userColumns(extra?: string[]): string {
-  const base = 'id,username,username_normalized,password_hash,created_at,last_login_at';
-  return extra && extra.length > 0 ? `${base},${extra.join(',')}` : base;
+/**
+ * users 表 SELECT 列。
+ *
+ * @param prefix 列名前缀。JOIN 查询里必须带表别名（u.），
+ *   否则 SQLite 会因为 id / created_at 等列在两张表里都存在而报
+ *   "ambiguous column name"。
+ */
+function userColumns(extra?: string[], prefix = ''): string {
+  const base = ['id', 'username', 'username_normalized', 'password_hash', 'created_at', 'last_login_at'];
+  const all = extra && extra.length > 0 ? [...base, ...extra] : base;
+  return all.map((column) => `${prefix}${column}`).join(',');
 }
 
 /**
@@ -202,7 +209,7 @@ export async function resolveSession(
   const row = await db
     .prepare(
       `SELECT s.id AS session_id, s.user_id, s.token_hash, s.expires_at,
-              ${userColumns(options.userExtraColumns)}
+              ${userColumns(options.userExtraColumns, 'u.')}
          FROM sessions s
          JOIN users u ON u.id = s.user_id
         WHERE s.token_hash = ?${statusFilter}`,
