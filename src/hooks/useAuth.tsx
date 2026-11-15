@@ -1,119 +1,93 @@
 /**
- * 认证 Hook + Provider：管理登录/注册/登出状态机
- * 可配置版本 - 各项目通过 configureDB 设置不同的数据库前缀
+ * 认证 Hook + Provider（向后兼容入口）
+ *
+ * 实现已下沉到 `@shared/core/auth`（统一认证基座）。本文件保留旧路径
+ * `@shared/core/hooks/useAuth`，让既有消费方无需改 import 即可用上新实现。
+ *
+ * 与旧版的差异：
+ * - 认证算法与状态机由 shared-core 的 `AuthProvider` 提供
+ * - `account` 字段保留（旧消费方在用），值为统一的 `AuthUser`
+ * - 新增 `user` / `errorCode` / `registerWith` / `driver`
+ *
+ * 不传 `driver` 时自动使用包内本地 IndexedDB 驱动（与旧版行为一致）：
+ * - 账户存 `${getDBPrefix()}` 库的 accounts 表
+ * - 登录态存 localStorage `${getDBPrefix()}-current-account`
+ * - 哈希格式 hex（盐与哈希分列），与历史数据兼容
  */
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { useMemo } from 'react';
+import {
+  AuthProvider as SharedAuthProvider,
+  createLocalAuthDriver,
+  useAuth as useSharedAuth,
+  type AuthDriver,
+} from '../auth';
+import { listAccounts, getAccountByUsername, createAccount, getDBPrefix } from '../services/db';
 import type { Account } from '../types';
-import { setCurrentAccountId, listAccounts, getDBPrefix } from '../services/db';
-import { registerAccount, verifyAccountPassword, resetAccountPassword } from '../services/auth';
 
-type AuthState = 'loading' | 'firstTime' | 'login' | 'authenticated';
+/** 状态机四态 */
+export type AuthState = 'loading' | 'firstTime' | 'login' | 'authenticated';
 
-interface AuthContextType {
-  state: AuthState;
-  account: Account | null;
-  login: (username: string, password: string) => Promise<boolean>;
-  register: (username: string, password: string) => Promise<boolean>;
-  logout: () => void;
-  resetPassword: (username: string, newPassword: string) => Promise<boolean>;
-  error: string | null;
+/**
+ * 上下文结构：与 shared-core 的统一上下文一致。
+ * 额外保留 `account` 别名（旧消费方在用）。
+ */
+export type AuthContextType = ReturnType<typeof useSharedAuth>;
+
+/** 包内本地驱动：接 shared-core 自己的 IndexedDB 数据层 */
+function createPackageLocalDriver(): AuthDriver {
+  return createLocalAuthDriver({
+    store: {
+      list: async () =>
+        (await listAccounts()).map((account: Account) => ({
+          id: account.id,
+          username: account.username,
+          passwordHash: account.passwordHash,
+          salt: account.salt,
+          createdAt: account.createdAt,
+        })),
+      findByUsername: async (username) => {
+        const found = await getAccountByUsername(username);
+        if (!found) return undefined;
+        return {
+          id: found.id,
+          username: found.username,
+          passwordHash: found.passwordHash,
+          salt: found.salt,
+          createdAt: found.createdAt,
+        };
+      },
+      put: async (account) => {
+        await createAccount(account as Account);
+      },
+    },
+    hashFormat: 'hex',
+    sessionMedium: 'localStorage',
+    storageKey: `${getDBPrefix()}-current-account`,
+  });
 }
 
-const AuthContext = createContext<AuthContextType | null>(null);
-
-export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [state, setState] = useState<AuthState>('loading');
-  const [account, setAccount] = useState<Account | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  const SESSION_KEY = `${getDBPrefix()}-current-account`;
-
-  useEffect(() => {
-    async function init() {
-      try {
-        const accounts = await listAccounts();
-        const savedId = localStorage.getItem(SESSION_KEY);
-
-        if (savedId) {
-          const found = accounts.find((a) => a.id === savedId);
-          if (found) {
-            setCurrentAccountId(found.id);
-            setAccount(found);
-            setState('authenticated');
-            return;
-          }
-        }
-
-        setState(accounts.length === 0 ? 'firstTime' : 'login');
-      } catch {
-        setState('firstTime');
-      }
-    }
-    init();
-  }, [SESSION_KEY]);
-
-  const login = useCallback(async (username: string, password: string): Promise<boolean> => {
-    setError(null);
-    try {
-      const acc = await verifyAccountPassword(username, password);
-      if (!acc) {
-        setError('用户名或密码错误');
-        return false;
-      }
-      setCurrentAccountId(acc.id);
-      localStorage.setItem(SESSION_KEY, acc.id);
-      setAccount(acc);
-      setState('authenticated');
-      return true;
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '登录失败');
-      return false;
-    }
-  }, [SESSION_KEY]);
-
-  const register = useCallback(async (username: string, password: string): Promise<boolean> => {
-    setError(null);
-    try {
-      const acc = await registerAccount(username, password);
-      setCurrentAccountId(acc.id);
-      localStorage.setItem(SESSION_KEY, acc.id);
-      setAccount(acc);
-      setState('authenticated');
-      return true;
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '注册失败');
-      return false;
-    }
-  }, [SESSION_KEY]);
-
-  const logout = useCallback(() => {
-    setCurrentAccountId(undefined);
-    localStorage.removeItem(SESSION_KEY);
-    setAccount(null);
-    setState('login');
-    setError(null);
-  }, [SESSION_KEY]);
-
-  const resetPassword = useCallback(async (username: string, newPassword: string): Promise<boolean> => {
-    setError(null);
-    try {
-      await resetAccountPassword(username, newPassword);
-      return true;
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '重置失败');
-      return false;
-    }
-  }, []);
-
+/**
+ * 认证 Provider。
+ * @param driver 可选的认证驱动；不传则用包内本地 IndexedDB 驱动（旧版行为）
+ */
+export function AuthProvider({
+  children,
+  driver,
+}: {
+  children: React.ReactNode;
+  driver?: AuthDriver;
+}) {
+  const resolved = useMemo(() => driver ?? createPackageLocalDriver(), [driver]);
   return (
-    <AuthContext.Provider value={{ state, account, login, register, logout, resetPassword, error }}>
+    <SharedAuthProvider driver={resolved} errorMode="boolean">
       {children}
-    </AuthContext.Provider>
+    </SharedAuthProvider>
   );
 }
 
+/**
+ * 取用认证数据的 hook。必须在 <AuthProvider> 内部使用。
+ */
 export function useAuth(): AuthContextType {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error('useAuth must be used within AuthProvider');
-  return ctx;
+  return useSharedAuth();
 }

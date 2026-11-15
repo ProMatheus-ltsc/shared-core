@@ -68,7 +68,6 @@ export {
 } from './services/cloudflareD1';
 
 // Hooks
-export { AuthProvider, useAuth } from './hooks/useAuth';
 export { ToastProvider, useToast } from './hooks/useToast';
 export type { ToastType, ToastMessage } from './hooks/useToast';
 export { useRecords, useRecord, useSaveRecord, useDeleteRecord, useSearchRecords } from './hooks/useDB';

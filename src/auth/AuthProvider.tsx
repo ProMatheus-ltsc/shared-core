@@ -48,10 +48,19 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 export interface AuthProviderProps {
   /** 认证驱动；不传则用传入的 children 之外的默认（见 AuthProvider 的 driver 必填） */
   driver: AuthDriver;
+  /**
+   * 失败时的表达方式，默认 'boolean'。
+   * - 'boolean' —— 登录/注册/重置失败时返回 false，错误信息在 `error` 字段
+   * - 'throw'   —— 失败时抛出 AuthError，由调用方 try/catch 捕获
+   *
+   * 两种都合法：布尔式适合"表单里读 error 字段"，抛异常式适合
+   * "await 之后直接导航"的写法。项目按自己的调用习惯选，不必改写业务代码。
+   */
+  errorMode?: 'boolean' | 'throw';
   children: React.ReactNode;
 }
 
-export function AuthProvider({ driver, children }: AuthProviderProps) {
+export function AuthProvider({ driver, errorMode = 'boolean', children }: AuthProviderProps) {
   const [state, setState] = useState<AuthState>('loading');
   const [user, setUser] = useState<AuthUser | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -72,6 +81,22 @@ export function AuthProvider({ driver, children }: AuthProviderProps) {
     setError(e instanceof Error ? e.message : fallback);
     setErrorCode('SERVER_ERROR');
   }, []);
+
+  /**
+   * 失败处理：按 errorMode 决定是抛异常还是返回 false。
+   * 抛异常时把 AuthError 原样抛出（保留 code），非 AuthError 包一层。
+   */
+  const handleFailure = useCallback(
+    (e: unknown, fallback: string): false => {
+      captureError(e, fallback);
+      if (errorMode === 'throw') {
+        if (e instanceof AuthError) throw e;
+        throw new AuthError('SERVER_ERROR', e instanceof Error ? e.message : fallback);
+      }
+      return false;
+    },
+    [captureError, errorMode],
+  );
 
   // 启动时恢复会话
   useEffect(() => {
@@ -108,11 +133,10 @@ export function AuthProvider({ driver, children }: AuthProviderProps) {
         setState('authenticated');
         return true;
       } catch (e) {
-        captureError(e, '登录失败');
-        return false;
+        return handleFailure(e, '登录失败');
       }
     },
-    [driver, clearError, captureError],
+    [driver, clearError, handleFailure],
   );
 
   const registerWith = useCallback(
@@ -124,11 +148,10 @@ export function AuthProvider({ driver, children }: AuthProviderProps) {
         setState('authenticated');
         return true;
       } catch (e) {
-        captureError(e, '注册失败');
-        return false;
+        return handleFailure(e, '注册失败');
       }
     },
-    [driver, clearError, captureError],
+    [driver, clearError, handleFailure],
   );
 
   const register = useCallback(
@@ -154,11 +177,10 @@ export function AuthProvider({ driver, children }: AuthProviderProps) {
         await driver.resetPassword?.({ username, newPassword } satisfies AuthResetPayload);
         return true;
       } catch (e) {
-        captureError(e, '重置失败');
-        return false;
+        return handleFailure(e, '重置失败');
       }
     },
-    [driver, clearError, captureError],
+    [driver, clearError, handleFailure],
   );
 
   const value = useMemo<AuthContextValue>(
