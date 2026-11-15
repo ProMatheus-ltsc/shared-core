@@ -105,7 +105,7 @@ import {
   readCookie,
   sha256Hex,
   verifyPassword,
-} from './authCore';
+} from './authCore.ts';
 import {
   authAttemptsExceeded,
   createSession,
@@ -117,7 +117,7 @@ import {
   touchLastLogin,
   type AuthUserRow,
   type D1Like,
-} from './authDb';
+} from './authDb.ts';
 
 /** 默认注册校验 */
 function defaultValidateRegister(payload: RegisterInput): string | null {

@@ -7,8 +7,8 @@
  * 但改为实现 AuthDriver 接口，从而与 REST 驱动可互换。
  */
 import { v4 as uuidv4 } from 'uuid';
-import type { AuthDriver, AuthCredential, AuthRegisterPayload, AuthResetPayload, AuthUser } from './types';
-import { AuthError, AUTH_ERROR_CODES } from './types';
+import type { AuthDriver, AuthCredential, AuthRegisterPayload, AuthResetPayload, AuthUser } from './types.ts';
+import { AuthError, AUTH_ERROR_CODES } from './types.ts';
 
 /**
  * PBKDF2 迭代次数。

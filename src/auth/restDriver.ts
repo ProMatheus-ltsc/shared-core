@@ -17,8 +17,8 @@ import type {
   AuthResetPayload,
   AuthResetRequest,
   AuthUser,
-} from './types';
-import { AuthError, AUTH_ERROR_CODES } from './types';
+} from './types.ts';
+import { AuthError, AUTH_ERROR_CODES } from './types.ts';
 
 /** 后端返回的用户载荷 */
 interface AuthUserPayload {

@@ -10,7 +10,7 @@
  */
 
 // Types
-export * from './types';
+export * from './types/index.ts';
 
 // Services
 export {
@@ -37,7 +37,7 @@ export {
   setLocalCurrentAccountId,
   AuthError,
   AUTH_ERROR_CODES,
-} from './auth';
+} from './auth/index.ts';
 export type {
   AuthState,
   AuthUser,
@@ -55,7 +55,7 @@ export type {
   LocalHashFormat,
   LocalSessionMedium,
   RestAuthDriverOptions,
-} from './auth';
+} from './auth/index.ts';
 export {
   createD1SyncService,
   createDefaultD1SyncAdapter,

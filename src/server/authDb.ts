@@ -34,7 +34,7 @@
  * 项目特有列（role / email / nickname / grade_level 等）通过 `userExtraColumns` 参与读写，
  * 但**不改变本模块的核心契约**：id 是 TEXT、token 只存哈希、登录名有归一化列。
  */
-import { sha256Hex } from './authCore';
+import { sha256Hex } from './authCore.ts';
 
 /** D1 的最小接口子集（避免依赖 @cloudflare/workers-types 类型） */
 export interface D1Like {

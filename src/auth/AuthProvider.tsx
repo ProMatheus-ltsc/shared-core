@@ -17,8 +17,8 @@
  *   同时抛出 AuthError 以便需要区分错误码的调用方使用。
  */
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
-import type { AuthDriver, AuthUser, AuthState, AuthCredential, AuthRegisterPayload, AuthResetPayload } from './types';
-import { AuthError, AUTH_ERROR_CODES } from './types';
+import type { AuthDriver, AuthUser, AuthState, AuthCredential, AuthRegisterPayload, AuthResetPayload } from './types.ts';
+import { AuthError, AUTH_ERROR_CODES } from './types.ts';
 
 export interface AuthContextValue {
   /** 四态状态机 */
