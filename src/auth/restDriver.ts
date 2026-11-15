@@ -33,6 +33,40 @@ interface AuthUserPayload {
   [key: string]: unknown;
 }
 
+/**
+ * 后端把用户包在 `{ user: {...} }` 里的响应形状。
+ *
+ * 共享包的 canonical 端点（`server/authRoutes.ts`）返回裸用户对象，
+ * 但已有消费方（civil / ability）的后端把用户包在 `{ user }` 里，
+ * 还会在同一层带上 `expiresAt` / `workspace` 等附加信息。
+ */
+interface AuthUserEnvelope {
+  user?: AuthUserPayload;
+  [key: string]: unknown;
+}
+
+/**
+ * 取用户载荷：兼容「裸用户对象」与「包在 `{ user }` 里」两种响应形状。
+ *
+ * 为什么必须兼容：驱动的 `restore()` 靠 `raw.id` 判断「有没有登录态」。
+ * 若后端返回的是 `{ user: { id } }`，直接读 `raw.id` 永远读不到 →
+ * `restore()` 恒返回 null → AuthProvider 把状态机置为 `login` →
+ * **用户刚登录就被弹回登录页**（症状：点开申论知识库这类新标签页后，
+ * 新标签页重新探测会话失败，看起来像「被踢下线」）。
+ */
+function extractUserPayload(raw: unknown): AuthUserPayload | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const candidate = raw as AuthUserPayload & AuthUserEnvelope;
+  // 顶层就有 id → 裸用户对象
+  if (candidate.id) return candidate;
+  // 否则看是不是 `{ user: {...} }` 信封
+  const nested = candidate.user;
+  if (nested && typeof nested === 'object' && nested.id) {
+    return nested;
+  }
+  return null;
+}
+
 export interface RestAuthDriverOptions {
   /** 认证端点前缀，默认 '/api/auth' */
   basePath?: string;
@@ -106,9 +140,12 @@ export function createRestAuthDriver(options: RestAuthDriverOptions = {}): AuthD
   return {
     async restore(): Promise<AuthUser | null> {
       try {
-        const raw = await request<AuthUserPayload>(`${basePath}/me`);
-        if (!raw || !raw.id) return null;
-        return mapUser(raw);
+        const raw = await request<AuthUserPayload | AuthUserEnvelope>(
+          `${basePath}/me`,
+        );
+        const payload = extractUserPayload(raw);
+        if (!payload) return null;
+        return mapUser(payload);
       } catch (error) {
         // 未登录是正常状态，不当错误抛
         if (error instanceof AuthError && error.status === 401) return null;
@@ -123,11 +160,20 @@ export function createRestAuthDriver(options: RestAuthDriverOptions = {}): AuthD
     },
 
     async login(credential: AuthCredential): Promise<AuthUser> {
-      const raw = await request<AuthUserPayload>(`${basePath}/login`, {
-        method: 'POST',
-        body: JSON.stringify({ username: credential.username, password: credential.password }),
-      });
-      return mapUser(raw);
+      const raw = await request<AuthUserPayload | AuthUserEnvelope>(
+        `${basePath}/login`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ username: credential.username, password: credential.password }),
+        },
+      );
+      const payload = extractUserPayload(raw);
+      if (!payload)
+        throw new AuthError(
+          AUTH_ERROR_CODES.SERVER_ERROR,
+          '登录响应缺少用户信息',
+        );
+      return mapUser(payload);
     },
 
     async register(payload: AuthRegisterPayload): Promise<AuthRegisterResult> {
@@ -153,7 +199,14 @@ export function createRestAuthDriver(options: RestAuthDriverOptions = {}): AuthD
           notice: envelope.notice ?? undefined,
         };
       }
-      return { status: 'created', user: mapUser(raw as AuthUserPayload) };
+      // 用户可能在顶层，也可能在 `{ user }` 层里（见 extractUserPayload 注释）
+      const user = extractUserPayload(raw);
+      if (!user)
+        throw new AuthError(
+          AUTH_ERROR_CODES.SERVER_ERROR,
+          '注册响应缺少用户信息',
+        );
+      return { status: 'created', user: mapUser(user) };
     },
 
     async verify(payload: AuthVerifyPayload): Promise<AuthUser> {
