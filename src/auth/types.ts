@@ -51,8 +51,15 @@ export interface AuthDriver {
   isFirstTime(): Promise<boolean>;
   /** 登录；失败时抛出 AuthError */
   login(credential: AuthCredential): Promise<AuthUser>;
-  /** 注册；失败时抛出 AuthError */
-  register(payload: AuthRegisterPayload): Promise<AuthUser>;
+  /**
+   * 注册。
+   *
+   * **可选**：并非所有系统都开放自助注册——
+   * 管理员预置账号、邀请码准入、一次性初始化双账号等场景都不提供注册入口。
+   * 驱动不提供时，AuthProvider 的 register/registerWith 会返回 false 并
+   * 在 error 字段给出说明。
+   */
+  register?(payload: AuthRegisterPayload): Promise<AuthUser>;
   /** 登出；后端清 Cookie，前端清本地态 */
   logout(): Promise<void>;
   /** 重置密码（可选实现） */

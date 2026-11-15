@@ -235,7 +235,19 @@ async function checkLocalHash(
  *   accountIdStrategy: 'username',
  * })
  */
-export function createLocalAuthDriver(options: LocalAuthDriverOptions): AuthDriver {
+/**
+ * 本地驱动的完整契约。
+ *
+ * AuthDriver.register 是可选的（并非所有系统都开放自助注册），
+ * 但本地驱动一定支持注册 —— 账号就存在本地，没有"管理员预置"这回事。
+ * 这里收窄一下类型，消费方就不必到处写 `driver.register!`。
+ */
+export interface LocalAuthDriver extends AuthDriver {
+  register(payload: AuthRegisterPayload): Promise<AuthUser>;
+  resetPassword(payload: AuthResetPayload): Promise<void>;
+}
+
+export function createLocalAuthDriver(options: LocalAuthDriverOptions): LocalAuthDriver {
   const { store } = options;
   const hashFormat = options.hashFormat ?? 'hex';
   const idStrategy = options.accountIdStrategy ?? 'uuid';

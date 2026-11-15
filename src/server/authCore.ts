@@ -89,9 +89,12 @@ export async function sha256Hex(value: string): Promise<string> {
 /**
  * 生成会话 token：两个 UUID 拼接去横线，64 位 hex。
  * 各项目历史实现一致（ability / civil / money-growth 均为此格式）。
+ *
+ * 用 split/join 而不是 replaceAll —— 部分消费方的 tsconfig lib 仍是
+ * ES2020，而 replaceAll 要 ES2021 才有。
  */
 export function generateSessionToken(): string {
-  return `${crypto.randomUUID()}${crypto.randomUUID()}`.replaceAll('-', '');
+  return `${crypto.randomUUID()}${crypto.randomUUID()}`.split('-').join('');
 }
 
 /**

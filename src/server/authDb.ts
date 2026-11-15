@@ -34,6 +34,7 @@
  * 项目特有列（role / email / nickname / grade_level 等）通过 `userExtraColumns` 参与读写，
  * 但**不改变本模块的核心契约**：id 是 TEXT、token 只存哈希、登录名有归一化列。
  */
+import { sha256Hex } from './authCore';
 
 /** D1 的最小接口子集（避免依赖 @cloudflare/workers-types 类型） */
 export interface D1Like {
@@ -141,19 +142,18 @@ function userColumns(extra?: string[], prefix = ''): string {
 /**
  * 创建会话：插入会话行。
  *
- * @param token 原始 token（只在这里出现一次，库里只存哈希）
- * @param tokenHash sha256(token)
+ * @param token 原始 token。**只在这里出现一次**，库里只存它的 sha256。
  */
 export async function createSession(
   db: D1Like,
   userId: string,
   token: string,
-  tokenHash: string,
   options: SessionOptions = {},
 ): Promise<{ expiresAt: string }> {
   const sessionDays = options.sessionDays ?? 30;
   const now = new Date();
   const expiresAt = new Date(now.getTime() + sessionDays * 86_400_000).toISOString();
+  const tokenHash = await sha256Hex(token);
 
   if (options.pruneExpiredGlobally !== false) {
     // 登录/注册是低频写，顺手清掉过期会话

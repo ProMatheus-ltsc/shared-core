@@ -18,7 +18,7 @@
  */
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import type { AuthDriver, AuthUser, AuthState, AuthCredential, AuthRegisterPayload, AuthResetPayload } from './types';
-import { AuthError } from './types';
+import { AuthError, AUTH_ERROR_CODES } from './types';
 
 export interface AuthContextValue {
   /** 四态状态机 */
@@ -159,6 +159,12 @@ export function AuthProvider({ driver, errorMode = 'boolean', children }: AuthPr
   const registerWith = useCallback(
     async (payload: AuthRegisterPayload) => {
       clearError();
+      if (!driver.register) {
+        return handleFailure(
+          new AuthError(AUTH_ERROR_CODES.INVALID_REQUEST, '当前系统未开放自助注册'),
+          '当前系统未开放自助注册',
+        );
+      }
       try {
         const next = await driver.register(payload);
         setUser(next);
