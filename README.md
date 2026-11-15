@@ -2,17 +2,26 @@
 
 ## 概述
 
-此包是多个项目的共用基础设施层，通过本地路径引用（非 npm 发布）实现代码共享：
+此包是多个项目的共用基础设施层，通过本地路径引用（非 npm 发布）实现代码共享。
 
-- **公考复盘系统** (`civil-exam-system`)
-- **根因分析系统** (`root-cause-analysis`)
-- **个人复盘系统** (`personal_review_system`)
-- **能力成长系统** (`ability-growth-system`)
-- **财富成长系统** (`money-growth-system`)
-- **量化交易系统** (`quant-trading-system`)
-- **交易账本** (`quant-trading-agent/journal`)
+### 哪些应用在用
 
-其中**注册登录已统一收归到本包**（前端 `auth/` + 后端 `server/`），各项目只声明自己的表结构与差异点，详见「统一注册登录」章节。
+| 应用 | 仓库 | 接入方式 | 用到本包的什么 |
+|---|---|---|---|
+| **公考复盘系统** | [civil-exam-drill](https://github.com/ProMatheus-ltsc/civil-exam-drill) | `file:../shared-core` | 组件库、Toast、表单引擎、**统一认证（前后端）**、**D1 访问层** |
+| **能力成长系统** | [ability-growth-system](https://github.com/ProMatheus-ltsc/ability-growth-system) | `file:../shared-core` | 组件库、Toast、表单引擎、**统一认证（前后端）**、**D1 访问层** |
+| **财富成长系统** | [money-growth-system](https://github.com/ProMatheus-ltsc/money-growth-system) | `file:../shared-core` | 组件库、Toast、表单引擎、**统一认证（前端 + 密码哈希）**、**D1 访问层** |
+| **根因分析系统** | [root-cause-analysis](https://github.com/ProMatheus-ltsc/root-cause-analysis) | `file:../shared-core` | 组件库、表单引擎、**统一认证（本地 IndexedDB）** |
+| **个人复盘系统** | [personal_review_system](https://github.com/ProMatheus-ltsc/personal_review_system) | `file:../shared-core` | 组件库、表单引擎、**统一认证（本地 IndexedDB）** |
+| **交易账本** | [quant-trading-agent](https://github.com/ProMatheus-ltsc/quant-trading-agent) → `journal/` | `file:./shared-core`（仓库内 vendored 副本） | 组件库、**统一认证（前后端，含两阶段邮箱验证注册）** |
+| **量化交易系统** | [quant-trading-system](https://github.com/ProMatheus-ltsc/quant-trading-system) | `file:../shared-core`（仓库内 vendored 副本） | 组件库、**统一认证的密码哈希**（其余自建：Node + Express + SQLite + JWT） |
+
+**统一到本包的两块基础设施**：
+
+- **注册登录** —— 前端 `auth/`（契约 + 驱动 + 状态机）+ 后端 `server/`（哈希 / 会话 / Cookie / D1 表操作）。各项目只声明自己的表结构与差异点。
+- **D1 访问层** —— 后端 `server/d1.ts`：统一类型声明与通用工具（分批执行、schema 探测、幂等 DDL、查询封装）。
+
+> **原则**：本包只维护最佳实践的**标准实现**。项目因必要原因（历史 schema、既有技术栈）需要偏离时，**在项目内声明适配**，本包不为个别项目塞特例——更不允许为了迁就共享包去 ALTER 项目的数据库。
 
 ## 引用方式（标准模式，参考 ability-growth-system）
 
@@ -279,6 +288,49 @@ const driver = createLocalAuthDriver({
 - **迭代次数**：默认 100000；项目若把迭代次数存进独立列，必须传实际值
 - **盐的字节处理**：`'bytes'`（解码后参与派生，默认）或 `'utf8'`（盐是字符串，取其 UTF-8 字节）
 
+### D1 访问层（后端）
+
+`@shared/core/server/d1` 统一各项目后端的 D1 接入方式。
+
+**背景**：各项目原先各写一套，类型写法都不一样——手写 `interface Statement`、官方 `D1Database`、`Env['DB']` 索引访问、甚至完全无类型（纯 JS）。运行时结构其实一致，只是类型标注各写各的。
+
+**统一写法**：
+
+```ts
+import { toD1, runBatches, queryAll, queryFirst, countRows } from '@shared/core/server/d1';
+
+// 任意写法的 D1 句柄都能转成统一类型
+const db = toD1(env.DB);
+
+// 查询
+const rows = await queryAll<User>(db, 'SELECT id, name FROM users WHERE id = ?', id);
+const one = await queryFirst<User>(db, 'SELECT id FROM users WHERE id = ?', id);
+
+// 写入
+await execute(db, 'INSERT INTO users (id) VALUES (?)', id);
+
+// 批量写入（D1 单次 batch 有语句数上限，自动分批）
+await runBatches(db, statements);
+```
+
+**类型**：`D1DatabaseLike` / `D1WithBatchLike` / `D1PreparedStatementLike` / `D1MetaLike` —— 与 Cloudflare 官方 `D1Database` 结构兼容，但**不依赖 `@cloudflare/workers-types`**（消费方不必装类型包）。
+
+**通用工具**：
+
+| 函数 | 用途 |
+|---|---|
+| `toD1(db)` | 把任意写法的句柄转成统一类型 |
+| `runBatches` / `runBatchesWithResults` | 分批执行（超上限自动切批） |
+| `schemaIsSatisfied` | schema 自愈前的结构探测（逐表） |
+| `schemaIsSatisfiedBatched` | 同上，但把所有 PRAGMA 探针打包成一次往返（冷启动探活用这个） |
+| `ensureColumn` / `ensureTable` / `ensureIndex` | 幂等 DDL（`ADD COLUMN` 不支持 `IF NOT EXISTS`，重复列当成功处理） |
+| `tableColumns` / `tableExists` / `hasColumn` | 结构探测 |
+| `countRows` / `queryAll` / `queryFirst` / `execute` / `ping` | 常用小工具 |
+
+> **不改数据模型**：本模块只管访问方式。表名、列名、索引、迁移文件全部由各项目自己管。
+
+---
+
 ### 表结构：沿用项目既有列，不改数据库
 
 > **原则**：本包只维护最佳实践的**标准实现**。项目因必要原因（历史 schema、既有技术栈）需要偏离时，**在项目内声明适配**，本包不为个别项目塞特例——更不允许为了迁就共享包去 ALTER 项目的数据库。
@@ -468,6 +520,7 @@ import { useSearch } from '@shared/core/hooks/useSearch';
 - `server/authCore.ts` — 密码哈希（认四种历史格式）、会话令牌、Cookie 助手、响应信封
 - `server/authDb.ts` — D1 用户/会话/限流表操作；`UserShape` 声明表形状，**不改消费方数据库**
 - `server/authRoutes.ts` — 6 个认证端点的框架无关分发
+- `server/d1.ts` — D1 访问层：统一类型声明（`D1DatabaseLike` 等）+ 分批执行 / schema 探测 / 幂等 DDL / 查询封装
 
 ### Hooks (`hooks/`)
 - `useToast.tsx` — 全局通知系统
@@ -518,4 +571,4 @@ import { useSearch } from '@shared/core/hooks/useSearch';
 3. **可配置**：Layout 等组件通过 props 接收项目特定配置
 4. **向后兼容**：已有项目的数据不受影响（数据库名不变）
 5. **最佳实践**：共用包只维护**标准实现**；项目因必要原因需要偏离时，在项目内自行适配，共用包不为个别项目塞特例
-6. **不改消费方的数据库**：共用包适配既有 schema（`UserShape` 声明表形状），**不要求项目 ALTER TABLE** 来迁就共用包。存量数据格式一律兼容——密码校验认全部历史哈希格式，老用户无需重置密码
+6. **不改消费方的数据库**：共用包适配既有 schema（`UserShape` 声明表形状、D1 访问层只管访问方式），**不要求项目 ALTER TABLE** 来迁就共用包。存量数据格式一律兼容——密码校验认全部历史哈希格式，老用户无需重置密码
