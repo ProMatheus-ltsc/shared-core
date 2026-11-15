@@ -80,9 +80,8 @@ export interface ResolvedSession {
 /**
  * users 表形状。
  *
- * 统一契约的核心不变：id 是 TEXT、username_normalized 唯一、
- * password_hash 自带盐、token 只存哈希。以下开关只覆盖**项目特有的表结构差异**，
- * 由项目自己声明，共享包不硬编码任何项目。
+ * 统一契约的核心不变：id 是 TEXT、token 只存哈希。以下开关只覆盖
+ * **项目特有的表结构差异**，由项目自己声明，共享包不硬编码任何项目。
  */
 export interface UserShape {
   /** 登录名归一化列名，默认 'username_normalized' */
@@ -95,6 +94,16 @@ export interface UserShape {
   usernameDisplayColumn?: string | null;
   /** 独立盐列名；为 null 表示盐内嵌在 password_hash 里 */
   saltColumn?: string | null;
+  /**
+   * 独立盐列里盐的编码格式，默认 'hex'。
+   * 有项目把盐存成 base64url（与哈希同族），此时声明 'base64url'。
+   */
+  saltEncoding?: 'hex' | 'base64';
+  /**
+   * 登录名归一化方式，默认 'lower'（转小写后比较）。
+   * 'none' 表示按原样精确匹配（该列自带 COLLATE NOCASE 时适用）。
+   */
+  usernameNormalization?: 'lower' | 'none';
   /** 是否有 last_login_at 列 */
   hasLastLoginAt?: boolean;
   /** 是否有 status 列（'active'/'disabled'）；有则禁用账户的会话立即失效 */
@@ -108,9 +117,31 @@ export const DEFAULT_USER_SHAPE: UserShape = {
   usernameColumn: 'username_normalized',
   usernameDisplayColumn: 'username',
   saltColumn: null,
+  saltEncoding: 'hex',
+  usernameNormalization: 'lower',
   hasLastLoginAt: true,
   hasStatusColumn: false,
   idMode: 'text',
+};
+
+/**
+ * sessions 表形状。
+ *
+ * 统一契约：sessions(id, user_id, token_hash, expires_at, created_at)。
+ * 有的项目用 token_hash 直接作主键（没有 id 列），此时声明 hasIdColumn: false。
+ */
+export interface SessionShape {
+  /** 是否有 id 列，默认 true */
+  hasIdColumn?: boolean;
+  /** sessions 表额外列（写入时一并填，如 user_agent / ip_hash） */
+  extraColumns?: string[];
+  /** 额外列的值来源 */
+  extraValues?: Record<string, unknown>;
+}
+
+/** 默认形状 */
+export const DEFAULT_SESSION_SHAPE: SessionShape = {
+  hasIdColumn: true,
 };
 
 /** 会话选项 */
@@ -125,6 +156,8 @@ export interface SessionOptions {
   userExtraColumns?: string[];
   /** users 表形状，默认通用契约 */
   userShape?: UserShape;
+  /** sessions 表形状，默认通用契约 */
+  sessionShape?: SessionShape;
   /** 生成会话 id */
   generateSessionId?: () => string;
 }
@@ -176,6 +209,7 @@ export async function createSession(
     );
   }
   const sessionDays = options.sessionDays ?? 30;
+  const sessionShape = options.sessionShape ?? DEFAULT_SESSION_SHAPE;
   const now = new Date();
   const expiresAt = new Date(now.getTime() + sessionDays * 86_400_000).toISOString();
   const tokenHash = await sha256Hex(token);
@@ -185,14 +219,26 @@ export async function createSession(
     await db.prepare('DELETE FROM sessions WHERE expires_at <= ?').bind(now.toISOString()).run();
   }
 
+  // sessions 表形状：多数项目有 id 列；用 token_hash 直接作主键的项目没有
+  const columns: string[] = sessionShape.hasIdColumn === false
+    ? ['user_id', 'token_hash', 'expires_at', 'created_at']
+    : ['id', 'user_id', 'token_hash', 'expires_at', 'created_at'];
+  const values: unknown[] = sessionShape.hasIdColumn === false
+    ? [userId, tokenHash, expiresAt, now.toISOString()]
+    : [`ses_${crypto.randomUUID()}`, userId, tokenHash, expiresAt, now.toISOString()];
+  for (const [key, value] of Object.entries(sessionShape.extraValues ?? {})) {
+    columns.push(key);
+    values.push(value);
+  }
+  const placeholders = columns.map(() => '?').join(',');
   await db
-    .prepare(
-      'INSERT INTO sessions (id,user_id,token_hash,expires_at,created_at) VALUES (?,?,?,?,?)',
-    )
-    .bind(`ses_${crypto.randomUUID()}`, userId, tokenHash, expiresAt, now.toISOString())
+    .prepare(`INSERT INTO sessions (${columns.join(',')}) VALUES (${placeholders})`)
+    .bind(...values)
     .run();
 
-  await pruneSessionsForUser(db, userId, options.maxSessionsPerUser ?? 20);
+  if (sessionShape.hasIdColumn !== false) {
+    await pruneSessionsForUser(db, userId, options.maxSessionsPerUser ?? 20);
+  }
   return { expiresAt };
 }
 
@@ -254,13 +300,14 @@ export async function resolveSession(
 ): Promise<ResolvedSession | null> {
   if (!token) return null;
   const userShape = options.userShape ?? DEFAULT_USER_SHAPE;
+  const sessionShape = options.sessionShape ?? DEFAULT_SESSION_SHAPE;
   // 被禁用（status='disabled'）的账户，其会话立即失效
   const statusFilter = userShape.hasStatusColumn
     ? " AND u.status='active'"
     : "";
   const row = await queryUsers<Record<string, unknown>>(
     db,
-    `SELECT s.id AS session_id, s.user_id, s.token_hash, s.expires_at,
+    `SELECT ${sessionShape.hasIdColumn === false ? 's.user_id' : 's.id AS session_id'}, s.user_id, s.token_hash, s.expires_at,
             ${userColumns(options.userExtraColumns, 'u.', userShape)}
        FROM sessions s
        JOIN users u ON u.id = s.user_id
@@ -273,7 +320,11 @@ export async function resolveSession(
   const expiresAt = String(row.expires_at ?? '');
   const expiry = Date.parse(expiresAt);
   if (!Number.isFinite(expiry) || expiry <= Date.now()) {
-    await db.prepare('DELETE FROM sessions WHERE id = ?').bind(String(row.session_id)).run();
+    if (sessionShape.hasIdColumn === false) {
+      await db.prepare('DELETE FROM sessions WHERE token_hash = ?').bind(tokenHash).run();
+    } else {
+      await db.prepare('DELETE FROM sessions WHERE id = ?').bind(String(row.session_id)).run();
+    }
     return null;
   }
 
@@ -322,10 +373,14 @@ export async function findUserByUsername(
 ): Promise<AuthUserRow | null> {
   const userShape = options.userShape ?? DEFAULT_USER_SHAPE;
   const column = userShape.usernameColumn ?? 'username_normalized';
+  const normalized =
+    userShape.usernameNormalization === 'none'
+      ? username
+      : username.toLocaleLowerCase('en-US');
   const row = await queryUsers<AuthUserRow>(
     db,
     `SELECT ${userColumns(options.userExtraColumns, '', userShape)} FROM users WHERE ${column} = ?`,
-    [column === 'username' ? username : username.toLocaleLowerCase('en-US')],
+    [normalized],
   );
   return row ?? null;
 }
@@ -352,6 +407,12 @@ export async function insertUser(
     id: string;
     username: string;
     passwordHash: string;
+    /**
+     * 登录名（展示用）的值，默认与 username 相同。
+     * 当展示名单列与登录名列不同（如登录名是 email、展示名是 display_name）时，
+     * 传这个字段写进展示名列。
+     */
+    displayName?: string;
     /** 独立盐列的值（当 userShape.saltColumn 非 null 时使用） */
     salt?: string;
     /** 项目特有列，如 { email, nickname, status, role, grade_level } */
@@ -374,11 +435,16 @@ export async function insertUser(
   }
   if (displayColumn) {
     columns.push(displayColumn);
-    values.push(user.username);
+    // 展示名列的值：显式给了 displayName 就用它，否则回落登录名
+    values.push(user.displayName ?? user.username);
   }
   if (usernameColumn !== displayColumn) {
     columns.push(usernameColumn);
-    values.push(user.username.toLocaleLowerCase('en-US'));
+    values.push(
+      userShape.usernameNormalization === 'none'
+        ? user.username
+        : user.username.toLocaleLowerCase('en-US'),
+    );
   }
   columns.push('password_hash');
   values.push(user.passwordHash);

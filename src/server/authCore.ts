@@ -148,19 +148,22 @@ export interface LegacyHashInput {
 /**
  * 识别并校验历史哈希格式。
  *
- * 收口时各项目历史用户的密码哈希有三种形态，全部要能校验，
+ * 收口时各项目历史用户的密码哈希有四种形态，全部要能校验，
  * 否则迁移当天所有老用户会被锁在门外：
  * 1. `pbkdf2-sha256$<iter>$<b64 salt>$<b64 hash>` —— civil / ability（当前统一格式）
  * 2. 裸 hex 摘要 + 独立 salt 列             —— money-growth-system
  * 3. `<b64 salt>:<b64 hash>`                —— personal_review_system（本地）
+ * 4. base64url 摘要 + 独立 salt 列           —— quant-trading-agent/journal
  *
- * @param stored 主存储值（格式 1 时是整串，格式 2 时是裸摘要，格式 3 时是组合串）
- * @param legacySalt 格式 2 的独立盐列
+ * @param stored 主存储值（格式 1 时是整串，格式 2/4 时是裸摘要，格式 3 时是组合串）
+ * @param legacySalt 格式 2/4 的独立盐列
+ * @param legacySaltEncoding 独立盐列的编码，默认 'hex'；格式 4 用 'base64url'
  */
 export async function verifyPassword(
   password: string,
   stored: string | null,
   legacySalt?: string | null,
+  legacySaltEncoding: 'hex' | 'base64url' = 'hex',
 ): Promise<boolean> {
   if (!stored) return false;
 
@@ -191,14 +194,31 @@ export async function verifyPassword(
     return toBase64(actual) === expected;
   }
 
-  // 格式 2：裸 hex 摘要 + 独立盐列（money-growth-system）
+  // 格式 2/4：裸摘要 + 独立盐列（money-growth / journal）
   if (legacySalt) {
-    const salt = fromHex(legacySalt);
+    const salt =
+      legacySaltEncoding === 'base64url'
+        ? fromBase64Url(legacySalt)
+        : fromHex(legacySalt);
     const actual = await derivePassword(password, salt, PASSWORD_ITERATIONS);
-    return toHex(actual) === stored;
+    return legacySaltEncoding === 'base64url'
+      ? toBase64Url(actual) === stored
+      : toHex(actual) === stored;
   }
 
   return false;
+}
+
+/** base64url → bytes */
+export function fromBase64Url(value: string): Uint8Array {
+  const padded = value.replace(/-/g, '+').replace(/_/g, '/');
+  const withPadding = padded + '='.repeat((4 - (padded.length % 4)) % 4);
+  return fromBase64(withPadding);
+}
+
+/** bytes → base64url（无 padding） */
+export function toBase64Url(bytes: Uint8Array): string {
+  return toBase64(bytes).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
 /** 常量时间比较，避免时序侧信道 */
