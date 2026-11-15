@@ -174,6 +174,15 @@ export interface LocalAuthDriverOptions {
   sessionMedium?: LocalSessionMedium;
   /** 账户 id 生成方式，默认 uuid；personal_review_system 历史上用 username 当 id */
   accountIdStrategy?: 'uuid' | 'username';
+  /**
+   * 当前账户变化时的回调（登录成功、会话恢复、登出时触发）。
+   *
+   * 本地优先项目普遍按账户隔离业务库（如 `review-app-{accountId}`），
+   * 切账户时必须同步切换业务库上下文，否则会读写到上一个账户的数据。
+   * 用本包自带的 `services/db` 时无需传——包内已自动调用 setCurrentAccountId；
+   * 用项目自有数据层时在这里接上项目的切换函数。
+   */
+  onAccountChange?: (accountId: string | undefined) => void;
 }
 
 /** 按配置的格式计算密码哈希 */
@@ -233,6 +242,14 @@ export function createLocalAuthDriver(options: LocalAuthDriverOptions): AuthDriv
   const storageKey = options.storageKey ?? `${options.prefix ?? 'shared-app'}-current-account`;
   const session = defaultSessionStore(storageKey, options.sessionMedium ?? 'localStorage');
 
+  /**
+   * 切换当前账户：更新包内镜像 + 通知消费方（让项目自己的业务库跟着切）。
+   */
+  const activate = (accountId: string | undefined) => {
+    setLocalCurrentAccountId(accountId);
+    options.onAccountChange?.(accountId);
+  };
+
   return {
     async restore(): Promise<AuthUser | null> {
       const accounts = await store.list();
@@ -243,7 +260,7 @@ export function createLocalAuthDriver(options: LocalAuthDriverOptions): AuthDriv
         session.clear();
         return null;
       }
-      setLocalCurrentAccountId(found.id);
+      activate(found.id);
       return toUser(found);
     },
 
@@ -260,7 +277,7 @@ export function createLocalAuthDriver(options: LocalAuthDriverOptions): AuthDriv
       if (!(await checkLocalHash(credential.password, hashFormat, account))) {
         throw new AuthError(AUTH_ERROR_CODES.INVALID_CREDENTIALS, '用户名或密码不正确');
       }
-      setLocalCurrentAccountId(account.id);
+      activate(account.id);
       session.set(account.id);
       return toUser(account);
     },
@@ -281,13 +298,13 @@ export function createLocalAuthDriver(options: LocalAuthDriverOptions): AuthDriv
         extra: payload.extra,
       };
       await store.put(account);
-      setLocalCurrentAccountId(account.id);
+      activate(account.id);
       session.set(account.id);
       return toUser(account);
     },
 
     async logout(): Promise<void> {
-      setLocalCurrentAccountId(undefined);
+      activate(undefined);
       session.clear();
     },
 
