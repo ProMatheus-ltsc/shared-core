@@ -150,6 +150,15 @@ export async function createSession(
   token: string,
   options: SessionOptions = {},
 ): Promise<{ expiresAt: string }> {
+  // 签名不匹配的防御：旧版签名第 4 位是 tokenHash（字符串），新版是 options（对象）。
+  // 传错时 options 会被当成字符串丢弃（sessionDays / userExtraColumns 全部失效），
+  // 症状很隐蔽——会话照常建立，但用户行查不出项目特有列。
+  if (typeof options !== 'object' || options === null) {
+    throw new Error(
+      'createSession 的第 4 个参数应为 options 对象（不是 tokenHash）——' +
+        '共享包已在内部自行计算 sha256(token)，调用方不要再传哈希',
+    );
+  }
   const sessionDays = options.sessionDays ?? 30;
   const now = new Date();
   const expiresAt = new Date(now.getTime() + sessionDays * 86_400_000).toISOString();
