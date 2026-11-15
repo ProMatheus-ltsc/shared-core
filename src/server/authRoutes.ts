@@ -26,7 +26,7 @@
 /** 路由配置 */
 export interface AuthRoutesOptions {
   /** D1 兼容的数据库句柄 */
-  db: import('./authDb').D1Like;
+  db: import('./authDb.ts').D1Like;
   /** 会话 Cookie 名，默认 'app_session' */
   sessionCookie?: string;
   /** 会话有效期天数，默认 30 */

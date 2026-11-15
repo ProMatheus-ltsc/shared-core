@@ -35,17 +35,18 @@
  * 但**不改变本模块的核心契约**：id 是 TEXT、token 只存哈希、登录名有归一化列。
  */
 import { sha256Hex } from './authCore.ts';
+import type { D1DatabaseLike, D1PreparedStatementLike } from './d1.ts';
 
-/** D1 的最小接口子集（避免依赖 @cloudflare/workers-types 类型） */
-export interface D1Like {
-  prepare(query: string): {
-    bind(...values: unknown[]): {
-      run(): Promise<{ success?: boolean }>;
-      first<T = unknown>(): Promise<T | null>;
-      all<T = unknown>(): Promise<{ results: T[] }>;
-    };
-  };
-}
+/**
+ * D1 句柄类型（收归 @shared/core/server/d1）。
+ *
+ * 与 Cloudflare 官方 `D1Database` 结构兼容，只是换成不依赖类型包的结构化类型。
+ * 保留这个别名是为了让既有调用方的类型标注不用改。
+ */
+export type D1Like = D1DatabaseLike;
+
+/** D1 预编译语句类型（收归 @shared/core/server/d1） */
+export type D1Statement = D1PreparedStatementLike;
 
 /** 用户行（标准字段 + 项目特有列） */
 export interface AuthUserRow {

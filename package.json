@@ -16,6 +16,7 @@
     "./server/authCore": "./src/server/authCore.ts",
     "./server/authDb": "./src/server/authDb.ts",
     "./server/authRoutes": "./src/server/authRoutes.ts",
+    "./server/d1": "./src/server/d1.ts",
     "./services/db": "./src/services/db.ts",
     "./services/auth": "./src/services/auth.ts",
     "./services/cloudflareD1": "./src/services/cloudflareD1.ts",

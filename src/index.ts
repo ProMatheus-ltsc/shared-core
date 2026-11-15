@@ -25,6 +25,33 @@ export {
 } from './services/db';
 export { registerAccount, verifyAccountPassword, resetAccountPassword } from './services/auth';
 
+// D1 访问层（后端）：统一类型声明 + 通用工具
+export {
+  toD1,
+  runBatches,
+  runBatchesWithResults,
+  schemaIsSatisfied,
+  schemaIsSatisfiedBatched,
+  ensureColumn,
+  ensureTable,
+  ensureIndex,
+  tableColumns,
+  tableExists,
+  hasColumn,
+  countRows,
+  queryAll,
+  queryFirst,
+  execute,
+  ping,
+  D1_MAX_BATCH_STATEMENTS,
+} from './server/d1.ts';
+export type {
+  D1DatabaseLike,
+  D1WithBatchLike,
+  D1PreparedStatementLike,
+  D1MetaLike,
+} from './server/d1.ts';
+
 // 统一认证（前端）
 export {
   AuthProvider,
