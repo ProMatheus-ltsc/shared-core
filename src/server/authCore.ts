@@ -106,6 +106,17 @@ export function generateSessionId(): string {
 
 // ===== 密码哈希 =====
 
+/**
+ * 盐的处理方式。
+ *
+ * - 'bytes'    —— 盐是随机字节，直接作为 PBKDF2 的 salt（civil / ability / money-growth）
+ * - 'utf8'     —— 盐是字符串，按其 UTF-8 字节作为 salt（quant-trading-agent/journal：
+ *                 盐用 randomToken 生成的是 base64url 字符串，再取其 UTF-8 字节）
+ *
+ * 两种方式的派生结果不同，写错一个字符老用户就登不进来，因此必须由调用方声明。
+ */
+export type SaltHandling = 'bytes' | 'utf8';
+
 async function derivePassword(
   password: string,
   salt: Uint8Array,
@@ -160,6 +171,8 @@ export interface LegacyHashInput {
  * @param legacySaltEncoding 独立盐列的编码，默认 'hex'；格式 4 用 'base64url'
  * @param legacyIterations 独立盐列格式的迭代次数，默认 100000；
  *        若项目把迭代次数存进独立列（用户注册时的值可能不是默认值），必须传这个值
+ * @param legacySaltHandling 独立盐列的字节处理方式，默认 'bytes'；
+ *        盐是字符串并按其 UTF-8 字节参与派生的项目传 'utf8'
  */
 export async function verifyPassword(
   password: string,
@@ -167,6 +180,7 @@ export async function verifyPassword(
   legacySalt?: string | null,
   legacySaltEncoding: 'hex' | 'base64url' = 'hex',
   legacyIterations?: number,
+  legacySaltHandling: SaltHandling = 'bytes',
 ): Promise<boolean> {
   if (!stored) return false;
 
@@ -201,7 +215,10 @@ export async function verifyPassword(
   if (legacySalt) {
     const salt =
       legacySaltEncoding === 'base64url'
-        ? fromBase64Url(legacySalt)
+        ? // 'utf8' 模式下盐是字符串，取其 UTF-8 字节；'bytes' 模式下是 base64url 解码后的字节
+          (legacySaltHandling === 'utf8'
+            ? encoder.encode(legacySalt)
+            : fromBase64Url(legacySalt))
         : fromHex(legacySalt);
     // 迭代次数可由调用方指定——有些项目把迭代次数存进独立列
     // （用户注册时的值可能是非默认值），写死 100000 会导致校验失败。
