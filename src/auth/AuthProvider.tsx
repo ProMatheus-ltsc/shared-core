@@ -39,6 +39,14 @@ export interface AuthContextValue {
   registerWith: (payload: AuthRegisterPayload) => Promise<boolean>;
   logout: () => Promise<void>;
   resetPassword: (username: string, newPassword: string) => Promise<boolean>;
+  /**
+   * 重新探测当前会话。
+   *
+   * 场景：会话在 Provider 之外发生了变化——例如密码重置成功后后端
+   * 直接下发了新的会话 Cookie、或管理员在另一个标签页改了账户状态。
+   * 此时调用 refresh() 让 Provider 重新读一次会话。
+   */
+  refresh: () => Promise<AuthUser | null>;
   /** 驱动实例，消费方可用于调用驱动特有的扩展能力（如发送重置邮件） */
   driver: AuthDriver;
 }
@@ -98,31 +106,40 @@ export function AuthProvider({ driver, errorMode = 'boolean', children }: AuthPr
     [captureError, errorMode],
   );
 
+  /**
+   * 探测当前会话：读到就更新为已登录，读不到就回到登录态。
+   * 启动时与 refresh() 共用同一套逻辑。
+   */
+  const probe = useCallback(async (): Promise<AuthUser | null> => {
+    try {
+      const restored = await driver.restore();
+      if (restored) {
+        setUser(restored);
+        setState('authenticated');
+        return restored;
+      }
+      const firstTime = await driver.isFirstTime();
+      setState(firstTime ? 'firstTime' : 'login');
+      return null;
+    } catch {
+      setState('login');
+      return null;
+    }
+  }, [driver]);
+
   // 启动时恢复会话
   useEffect(() => {
     let cancelled = false;
-    async function init() {
-      try {
-        const restored = await driver.restore();
-        if (cancelled) return;
-        if (restored) {
-          setUser(restored);
-          setState('authenticated');
-          return;
-        }
-        const firstTime = await driver.isFirstTime();
-        if (cancelled) return;
-        setState(firstTime ? 'firstTime' : 'login');
-      } catch {
-        if (cancelled) return;
-        setState('login');
-      }
-    }
-    void init();
+    void probe().finally(() => {
+      if (cancelled) return;
+    });
     return () => {
       cancelled = true;
     };
-  }, [driver]);
+  }, [probe]);
+
+  /** 重新探测会话（会话在 Provider 之外变化时调用） */
+  const refresh = useCallback(async (): Promise<AuthUser | null> => probe(), [probe]);
 
   const login = useCallback(
     async (username: string, password: string) => {
@@ -196,9 +213,22 @@ export function AuthProvider({ driver, errorMode = 'boolean', children }: AuthPr
       registerWith,
       logout,
       resetPassword,
+      refresh,
       driver,
     }),
-    [state, user, error, errorCode, login, register, registerWith, logout, resetPassword, driver],
+    [
+      state,
+      user,
+      error,
+      errorCode,
+      login,
+      register,
+      registerWith,
+      logout,
+      resetPassword,
+      refresh,
+      driver,
+    ],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
