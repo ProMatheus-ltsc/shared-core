@@ -9,6 +9,10 @@
 - **个人复盘系统** (`personal_review_system`)
 - **能力成长系统** (`ability-growth-system`)
 - **财富成长系统** (`money-growth-system`)
+- **量化交易系统** (`quant-trading-system`)
+- **交易账本** (`quant-trading-agent/journal`)
+
+其中**注册登录已统一收归到本包**（前端 `auth/` + 后端 `server/`），各项目只声明自己的表结构与差异点，详见「统一注册登录」章节。
 
 ## 引用方式（标准模式，参考 ability-growth-system）
 
@@ -267,7 +271,11 @@ const driver = createLocalAuthDriver({
 2. 裸 hex 摘要 + 独立 `salt` 列（money-growth）
 3. `<base64salt>:<base64hash>`（personal_review_system）
 
-### 统一表结构（服务端项目迁移目标）
+### 表结构：沿用项目既有列，不改数据库
+
+> **原则**：本包只维护最佳实践的**标准实现**。项目因必要原因（历史 schema、既有技术栈）需要偏离时，**在项目内声明适配**，本包不为个别项目塞特例——更不允许为了迁就共享包去 ALTER 项目的数据库。
+
+**推荐形态**（新建项目照此建表）：
 
 ```sql
 CREATE TABLE users (
@@ -294,7 +302,48 @@ CREATE TABLE auth_attempts (
 );
 ```
 
-项目特有列（`role` / `email` / `nickname` / `grade_level` 等）通过 `userExtraColumns` 参与读写，不改变核心契约。
+**已有表结构不同怎么办**：用 `UserShape` 声明本项目的形状，共享包按形状取列，**无需迁移数据库**。
+
+```ts
+import { DEFAULT_USER_SHAPE } from '@shared/core/server/authDb';
+
+// 例：登录标识是邮箱、没有 username 列、展示名是 nickname
+const USER_SHAPE = {
+  ...DEFAULT_USER_SHAPE,
+  usernameColumn: 'email_normalized',   // 登录名归一化列
+  usernameDisplayColumn: null,          // null = 没有这一列
+  hasStatusColumn: true,                // 有 status 列 → 禁用账户会话立即失效
+};
+```
+
+`UserShape` 各项：
+
+| 字段 | 默认 | 含义 |
+|---|---|---|
+| `usernameColumn` | `username_normalized` | 登录名归一化列（查用户用这一列） |
+| `usernameDisplayColumn` | `username` | 登录名展示列；`null` 表示没这一列 |
+| `saltColumn` | `null` | 独立盐列；`null` 表示盐内嵌在 `password_hash` 里 |
+| `hasLastLoginAt` | `true` | 有无 `last_login_at` 列 |
+| `hasStatusColumn` | `false` | 有无 `status` 列；有则禁用账户的会话立即失效 |
+| `idMode` | `text` | `text` 或 `autoincrement`（INTEGER 主键） |
+
+项目特有列（`role` / `email` / `nickname` / `grade_level` 等）通过 `userExtraColumns` 参与读写。
+
+> 若漏传 `userShape` 导致列名对不上，共享包会抛出明确的提示
+> （"请在调用时传 userShape"），而不是裸的 SQLite `no such column`。
+
+### 各项目的落地情况
+
+| 项目 | 形态 | 偏离点 |
+|---|---|---|
+| civil-exam-drill | 服务端 REST + HttpOnly Cookie | 登录标识是邮箱（`email_normalized`）；昵称在邀请码范围内唯一；密码重置走 Resend |
+| ability-growth-system | 服务端 REST + HttpOnly Cookie | 用户档案带 `role` / `grade_level`；workspace 由服务端从会话推导 |
+| money-growth-system | 服务端 REST + **Bearer token** | **Bearer 而非 Cookie**——运维脚本等非浏览器客户端需要 `Authorization` 头；**未开放自助注册**（账号由管理员预置） |
+| root-cause-analysis | 本地 IndexedDB | 哈希 hex 格式（盐与哈希分列）；会话键 `rca-current-account-id` |
+| personal_review_system | 本地 IndexedDB | 哈希 base64 格式（盐在哈希串里）；会话介质 sessionStorage；账户 id 即用户名 |
+| quant-trading-system | 自建（Node + Express + SQLite + JWT + bcrypt） | 技术栈不兼容 Cloudflare D1；**渐进迁移**——认统一格式，新注册用统一格式，bcrypt 老用户登录成功后就地升级 |
+| quant-trading-agent/journal | 自建（JS + D1） | 两阶段邮箱验证注册（统一契约未覆盖）；且该目录不在本仓库交付锁范围内 |
+
 
 ## Cloudflare D1 容灾备份/多端同步（可选）
 
@@ -409,7 +458,7 @@ import { useSearch } from '@shared/core/hooks/useSearch';
 - `auth/restDriver.ts` — 服务端（REST + HttpOnly Cookie）驱动，端点前缀可配
 - `auth/AuthProvider.tsx` — 统一四态状态机 Provider + `useAuth` / `useAuthUser` / `useAuthRole`
 - `server/authCore.ts` — 密码哈希（含三种历史格式互认）、会话令牌、Cookie 助手、响应信封
-- `server/authDb.ts` — D1 用户/会话/限流表操作
+- `server/authDb.ts` — D1 用户/会话/限流表操作；`UserShape` 声明表形状，**不改消费方数据库**
 - `server/authRoutes.ts` — 6 个认证端点的框架无关分发
 
 ### Hooks (`hooks/`)
@@ -460,3 +509,5 @@ import { useSearch } from '@shared/core/hooks/useSearch';
 2. **零耦合**：共用包不依赖任何项目的业务逻辑
 3. **可配置**：Layout 等组件通过 props 接收项目特定配置
 4. **向后兼容**：已有项目的数据不受影响（数据库名不变）
+5. **最佳实践**：共用包只维护**标准实现**；项目因必要原因需要偏离时，在项目内自行适配，共用包不为个别项目塞特例
+6. **不改消费方的数据库**：共用包适配既有 schema（`UserShape` 声明表形状），**不要求项目 ALTER TABLE** 来迁就共用包。存量数据格式一律兼容——密码校验认全部历史哈希格式，老用户无需重置密码
