@@ -158,12 +158,15 @@ export interface LegacyHashInput {
  * @param stored 主存储值（格式 1 时是整串，格式 2/4 时是裸摘要，格式 3 时是组合串）
  * @param legacySalt 格式 2/4 的独立盐列
  * @param legacySaltEncoding 独立盐列的编码，默认 'hex'；格式 4 用 'base64url'
+ * @param legacyIterations 独立盐列格式的迭代次数，默认 100000；
+ *        若项目把迭代次数存进独立列（用户注册时的值可能不是默认值），必须传这个值
  */
 export async function verifyPassword(
   password: string,
   stored: string | null,
   legacySalt?: string | null,
   legacySaltEncoding: 'hex' | 'base64url' = 'hex',
+  legacyIterations?: number,
 ): Promise<boolean> {
   if (!stored) return false;
 
@@ -200,7 +203,9 @@ export async function verifyPassword(
       legacySaltEncoding === 'base64url'
         ? fromBase64Url(legacySalt)
         : fromHex(legacySalt);
-    const actual = await derivePassword(password, salt, PASSWORD_ITERATIONS);
+    // 迭代次数可由调用方指定——有些项目把迭代次数存进独立列
+    // （用户注册时的值可能是非默认值），写死 100000 会导致校验失败。
+    const actual = await derivePassword(password, salt, legacyIterations ?? PASSWORD_ITERATIONS);
     return legacySaltEncoding === 'base64url'
       ? toBase64Url(actual) === stored
       : toHex(actual) === stored;
