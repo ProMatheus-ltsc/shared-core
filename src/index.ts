@@ -24,6 +24,38 @@ export {
   getSnapshotsByRecord, putSnapshot, deleteSnapshot, deleteSnapshotsByRecord,
 } from './services/db';
 export { registerAccount, verifyAccountPassword, resetAccountPassword } from './services/auth';
+
+// 统一认证（前端）
+export {
+  AuthProvider,
+  useAuth,
+  useAuthUser,
+  useAuthRole,
+  createLocalAuthDriver,
+  createRestAuthDriver,
+  getLocalCurrentAccountId,
+  setLocalCurrentAccountId,
+  AuthError,
+  AUTH_ERROR_CODES,
+} from './auth';
+export type {
+  AuthState,
+  AuthUser,
+  AuthDriver,
+  AuthCredential,
+  AuthRegisterPayload,
+  AuthResetPayload,
+  AuthResetRequest,
+  AuthErrorCode,
+  AuthContextValue,
+  AuthProviderProps,
+  LocalAccount,
+  LocalAccountStore,
+  LocalAuthDriverOptions,
+  LocalHashFormat,
+  LocalSessionMedium,
+  RestAuthDriverOptions,
+} from './auth';
 export {
   createD1SyncService,
   createDefaultD1SyncAdapter,

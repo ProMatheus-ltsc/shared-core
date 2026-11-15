@@ -201,6 +201,101 @@ import { detectLoops } from '@shared/core';
 const { loops, leveragePoints } = detectLoops(causalChain);
 ```
 
+## 统一注册登录（auth/ + server/）
+
+> **设计原则**：本包只维护**最佳实践的标准实现**。项目因必要原因（历史 schema、既有技术栈、特殊业务约束）需要偏离时，**在项目内自行适配**，本包不为个别项目塞特例。能复用本包的尽量复用。
+
+### 分层
+
+```
+前端：src/auth/          —— 契约 + 驱动 + 统一状态机（React）
+后端：src/server/        —— 哈希 / 会话 / Cookie / D1 存储 / 路由分发（框架无关，纯 TS）
+```
+
+### 前端（`@shared/core/auth`）
+
+前端只认一个接口 `AuthDriver`，认证后端由项目注入：
+
+```tsx
+import { AuthProvider, useAuth, createRestAuthDriver, createLocalAuthDriver } from '@shared/core/auth';
+
+// 服务端模式：REST + HttpOnly Cookie（前端不接触 token）
+const driver = createRestAuthDriver({ basePath: '/api/auth' });
+
+// 本地模式：IndexedDB（纯前端项目）
+const driver = createLocalAuthDriver({
+  store: { list, findByUsername, put },   // 接项目自己的 IndexedDB 实现
+  prefix: 'rca-app',
+  hashFormat: 'hex',                      // 'hex' | 'base64'（见下）
+  sessionMedium: 'localStorage',          // 'localStorage' | 'sessionStorage'
+});
+
+<AuthProvider driver={driver}><App /></AuthProvider>;
+```
+
+`useAuth()` 返回统一结构：
+
+| 字段 | 说明 |
+|---|---|
+| `state` | `'loading' \| 'firstTime' \| 'login' \| 'authenticated'` 四态 |
+| `user` | `AuthUser { id, username, displayName?, email?, extra? }`，项目特有字段进 `extra` |
+| `account` | 兼容字段（同 `user`） |
+| `initializing` | `state === 'loading'` |
+| `error` / `errorCode` | 可直接展示的中文文案 + 机器可读错误码 |
+| `login` / `register` / `registerWith` / `logout` / `resetPassword` | 统一签名 |
+| `driver` | 驱动实例，供项目调用扩展能力（如发送重置邮件） |
+
+### 后端（`@shared/core/server/*`）
+
+| 模块 | 职责 |
+|---|---|
+| `server/authCore` | 密码哈希、常量时间校验、哑元哈希（防枚举）、会话令牌、Cookie 拼装/读取、响应信封 |
+| `server/authDb` | D1 用户/会话/限流表操作（只依赖 D1 的 `prepare/bind` 接口，不依赖框架） |
+| `server/authRoutes` | 6 个认证端点的统一分发（框架无关，Hono / 裸 Pages Functions 均可接） |
+
+**统一约定**：
+
+- 密码哈希格式 `pbkdf2-sha256$<iterations>$<base64 salt>$<base64 hash>`（100000 次迭代）
+- 会话 token 只在 Cookie 里出现，**库里只存 `sha256(token)`**
+- Cookie：`HttpOnly` + `SameSite=Strict` + `Secure`(https) + 30 天
+- 响应信封 `{ success: true, data }` / `{ success: false, error: { code, message } }`
+- 端点：`POST /auth/register`、`/auth/login`、`/auth/logout`、`GET /auth/me`、`POST /auth/password/forgot`、`/auth/password/reset`
+
+**迁移友好**：`verifyPassword` 认全部三种历史格式，老用户迁移当天不会被锁在门外——
+
+1. `pbkdf2-sha256$...$...$...`（ability / civil，统一格式）
+2. 裸 hex 摘要 + 独立 `salt` 列（money-growth）
+3. `<base64salt>:<base64hash>`（personal_review_system）
+
+### 统一表结构（服务端项目迁移目标）
+
+```sql
+CREATE TABLE users (
+  id TEXT PRIMARY KEY,
+  username TEXT NOT NULL,
+  username_normalized TEXT NOT NULL UNIQUE,
+  password_hash TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  last_login_at TEXT NOT NULL
+);
+CREATE TABLE sessions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE,
+  expires_at TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE TABLE auth_attempts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  client_key TEXT NOT NULL,
+  succeeded INTEGER NOT NULL,
+  created_at TEXT NOT NULL
+);
+```
+
+项目特有列（`role` / `email` / `nickname` / `grade_level` 等）通过 `userExtraColumns` 参与读写，不改变核心契约。
+
 ## Cloudflare D1 容灾备份/多端同步（可选）
 
 > **前提**：该能力面向使用 **Cloudflare 技术栈（Workers + D1）** 的 **Local-First** 项目——本地 IndexedDB 为主数据源，D1 仅作异地容灾备份与多端同步（冲突策略 Last-Write-Wins，以记录的 `updatedAt`（回退 `createdAt`/`evaluationTime`）为准）。**直接以 D1 为主数据库的项目（如 money-growth-system）无需接入本能力。**
@@ -305,11 +400,19 @@ import { useSearch } from '@shared/core/hooks/useSearch';
 
 ### 服务 (`services/`)
 - `db.ts` — IndexedDB 多账户隔离数据层（可配置数据库前缀，含快照 CRUD：getSnapshotsByRecord/putSnapshot/deleteSnapshot）
-- `auth.ts` — PBKDF2-SHA256 本地认证
+- `auth.ts` — PBKDF2-SHA256 本地认证（**旧版**，新项目请用 `auth/` 下的统一认证）
 - `cloudflareD1.ts` — Cloudflare D1 容灾备份/多端同步（`createD1SyncService` 工厂 + `D1SyncDataAdapter` 适配器注入 + `createDefaultD1SyncAdapter` 默认适配器，Local-First，冲突 LWW）
 
+### 统一认证 (`auth/` + `server/`)
+- `auth/types.ts` — `AuthDriver` 契约、`AuthUser`、`AuthState`、`AuthError`、标准错误码
+- `auth/localDriver.ts` — 本地（IndexedDB）驱动，支持 `hex` / `base64` 两种历史哈希格式与两种会话介质
+- `auth/restDriver.ts` — 服务端（REST + HttpOnly Cookie）驱动，端点前缀可配
+- `auth/AuthProvider.tsx` — 统一四态状态机 Provider + `useAuth` / `useAuthUser` / `useAuthRole`
+- `server/authCore.ts` — 密码哈希（含三种历史格式互认）、会话令牌、Cookie 助手、响应信封
+- `server/authDb.ts` — D1 用户/会话/限流表操作
+- `server/authRoutes.ts` — 6 个认证端点的框架无关分发
+
 ### Hooks (`hooks/`)
-- `useAuth.tsx` — 认证状态机 Provider + Hook
 - `useToast.tsx` — 全局通知系统
 - `useDB.ts` — 数据 CRUD Hooks
 - `usePhaseLogic.ts` — 多阶段表单生命周期（含 useFormPhaseLogic 增强版）
