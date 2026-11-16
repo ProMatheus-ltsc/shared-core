@@ -25,7 +25,13 @@ export interface AuthContextValue {
   state: AuthState;
   /** 当前登录用户（统一 AuthUser）；未登录为 null */
   user: AuthUser | null;
-  /** 兼容字段：原始账号对象（本地模式为 Account，服务端模式为后端 user 载荷） */
+  /**
+   * 兼容字段：原始账号对象。
+   *
+   * 项目特有字段（role / workspace / gradeLevel 等）在**顶层**直接可读，
+   * 与各项目原先 `const { account } = useAuth(); account.role` 的写法一致；
+   * 同一份字段也保留在 `user.extra` 里，两种读法都成立。
+   */
   account: (AuthUser & Record<string, unknown>) | null;
   /** 是否处于初始化中 */
   initializing: boolean;
@@ -258,11 +264,22 @@ export function AuthProvider({ driver, errorMode = 'boolean', children }: AuthPr
     [driver, clearError, handleFailure],
   );
 
+  /**
+   * account 把 extra 摊平到顶层：老代码读 `account.role` / `account.workspace`
+   * 时能拿到值（此前只有 `account.extra.role`，顶层恒为 undefined，
+   * 依赖它做业务命名空间/权限判断的项目会静默退化成默认值）。
+   * 标准字段（id / username / displayName / email）优先级高于 extra 里的同名键。
+   */
+  const account = useMemo<AuthContextValue['account']>(() => {
+    if (!user) return null;
+    return { ...(user.extra ?? {}), ...user } as AuthUser & Record<string, unknown>;
+  }, [user]);
+
   const value = useMemo<AuthContextValue>(
     () => ({
       state,
       user,
-      account: user as (AuthUser & Record<string, unknown>) | null,
+      account,
       initializing: state === 'loading',
       error,
       errorCode,
@@ -280,6 +297,7 @@ export function AuthProvider({ driver, errorMode = 'boolean', children }: AuthPr
     [
       state,
       user,
+      account,
       error,
       errorCode,
       login,

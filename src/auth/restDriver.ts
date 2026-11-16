@@ -36,9 +36,13 @@ interface AuthUserPayload {
 /**
  * 后端把用户包在 `{ user: {...} }` 里的响应形状。
  *
- * 共享包的 canonical 端点（`server/authRoutes.ts`）返回裸用户对象，
- * 但已有消费方（civil / ability）的后端把用户包在 `{ user }` 里，
- * 还会在同一层带上 `expiresAt` / `workspace` 等附加信息。
+ * 这不是「个别项目的特例」，而是本包的 canonical 形状：`server/authRoutes.ts`
+ * 的 login / me 都返回 `authOk({ user, expiresAt })`，默认 request 剥掉外层
+ * `data` 后，驱动拿到的正是 `{ user, expiresAt }`。
+ * （曾误以为 canonical 是裸对象，导致「基座服务端 + 基座客户端」组出来的应用
+ * 登录态恒被误判为未登录——形状契约必须写清楚，不能靠消费方自己猜。）
+ *
+ * 部分消费方后端还会在同一层带上 `expiresAt` / `workspace` / `profile` 等附加信息。
  */
 interface AuthUserEnvelope {
   user?: AuthUserPayload;
@@ -46,23 +50,32 @@ interface AuthUserEnvelope {
 }
 
 /**
- * 取用户载荷：兼容「裸用户对象」与「包在 `{ user }` 里」两种响应形状。
+ * 取用户载荷：兼容三种响应形状
+ * - 裸用户对象 `{ id, username, ... }`
+ * - `{ user: {...} }`（本包服务端默认口径）
+ * - `{ data: {...} }`（自定义 request 把整个 `{ success, data }` 信封原样返回时）
  *
  * 为什么必须兼容：驱动的 `restore()` 靠 `raw.id` 判断「有没有登录态」。
  * 若后端返回的是 `{ user: { id } }`，直接读 `raw.id` 永远读不到 →
  * `restore()` 恒返回 null → AuthProvider 把状态机置为 `login` →
- * **用户刚登录就被弹回登录页**（症状：点开申论知识库这类新标签页后，
- * 新标签页重新探测会话失败，看起来像「被踢下线」）。
+ * **用户刚登录就被弹回登录页**（症状：点开新标签页后，新标签页重新探测
+ * 会话失败，看起来像「被踢下线」）；`login()` 则映射出 `id: undefined`，
+ * 业务命名空间变成 `xxx-undefined`，本地引导标记读不到 → 每次登录都走引导页。
+ *
+ * 这类失败没有任何报错信号，所以形状差异必须由基座消化，不能让每个消费方
+ * 各写一份解包（写过的那份一旦包反了就是上面两个线上故障）。
  */
-function extractUserPayload(raw: unknown): AuthUserPayload | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const candidate = raw as AuthUserPayload & AuthUserEnvelope;
+function extractUserPayload(raw: unknown, depth = 0): AuthUserPayload | null {
+  if (!raw || typeof raw !== 'object' || depth > 2) return null;
+  const candidate = raw as AuthUserPayload & AuthUserEnvelope & { data?: unknown };
   // 顶层就有 id → 裸用户对象
   if (candidate.id) return candidate;
-  // 否则看是不是 `{ user: {...} }` 信封
-  const nested = candidate.user;
-  if (nested && typeof nested === 'object' && nested.id) {
-    return nested;
+  // 否则依次看 `{ user }` 与 `{ data }` 信封
+  for (const nested of [candidate.user, candidate.data]) {
+    if (nested && typeof nested === 'object') {
+      const found = extractUserPayload(nested, depth + 1);
+      if (found) return found;
+    }
   }
   return null;
 }
@@ -73,6 +86,9 @@ export interface RestAuthDriverOptions {
   /**
    * 请求函数。默认用 fetch + credentials:'include'。
    * 传入自定义实现以适配各项目已有的 api/client（如统一错误信封、统一 baseURL）。
+   *
+   * 返回什么形状都可以：扁平用户对象、`{ user }`、甚至整个
+   * `{ success, data }` 信封 —— 驱动内部会自己拆到用户层。
    */
   request?: <T>(path: string, init?: RequestInit) => Promise<T>;
   /** 从响应载荷里取用户字段的映射，覆盖默认映射 */
